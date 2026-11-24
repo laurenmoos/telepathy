@@ -76,14 +76,22 @@ Settings are under `reads` in `config.yaml`. `kind: direct` switches back to the
 | `probes.py` | Device choice and gate fitting. |
 | `sae.py` | The sparse autoencoder, and building a read from its features. |
 
-## Results so far (Qwen3-0.6B on the Mac's GPU, `--generations 0`)
-
-This run only wrote the first programs and tested the best one, with no generations of improvement.
+## Results so far (Qwen3-0.6B on the Mac's GPU, 6 generations, reads from the model's own features)
 
 | | Test boards (2-5 empty cells): solved / cells right | Harder boards (10-20 empty): solved / cells right |
 |---|---|---|
 | Rule in words, no program | 0% / 11% | 0% / 14% |
 | No program | 0% / 13% | 0% / 8% |
-| Best of the first programs | 83% / 95% | 0% / 59% |
+| Best found | 67% / 85% | 0% / 59% |
 
-The gates read "is this digit in this line?" at 93-98% accuracy at layers 1 and 2, for rows, columns and boxes alike.
+The best program came from recombining and mutating the model's programs in generation 4:
+
+```
+(seq (for v (read BOX v 1) (read COL v 2)) (for v (read COL v 1)) (read ROW 9 1) (write 0.20))
+```
+
+It checks every digit in the box and the column, but only the digit 9 in the row.
+
+**Reads.** Built from the model's own autoencoder features, a read ("is digit D on this line?") is right about 85% of the time at layer 1, for rows, columns and boxes alike, and less at deeper layers (about 77% at layer 2, 65-73% at layer 4). A probe on the model's raw state gets 95-98%. The autoencoders rebuild 97% of the line-end state at layer 1 and 87% at layer 4.
+
+**Harder boards.** No board fully solved: each wrong digit stays on the board, and cells are filled in reading order even when a cell doesn't yet have a single possible answer.
