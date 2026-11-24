@@ -7,7 +7,8 @@
      - the model's state at the end of the cell's row, column and box lines, at each read layer
      - the model's state at '=' after the last layer, before the final normalization
    Reads and writes are then computed from these numbers, with no further model calls:
-     read  = gate direction . state at the line end - threshold   (> 0 means "digit is there")
+     read  = weights . (a few autoencoder features of the state at the line end) - threshold
+             (> 0 means "digit is there")
      write = add strength x (typical state size) x (direction of that digit's output row)
              to the '=' state, then normalize and score the nine digits as the model does.
    Adding the push here gives exactly what a hook on the last layer would give.
@@ -23,11 +24,17 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, StoppingCriteria, 
 
 import sudoku
 import sae as sae_lib
-from probes import fit_probe, pick_device
 
 
-def read_accuracy(gate):
-    return gate["acc"] if isinstance(gate, dict) else gate[2]
+def pick_device(name="auto"):
+    """The Mac's GPU if there is one, else CUDA, else the CPU."""
+    if name != "auto":
+        return name
+    if torch.backends.mps.is_available():
+        return "mps"
+    if torch.cuda.is_available():
+        return "cuda"
+    return "cpu"
 
 
 def box_of(r, c):
@@ -118,11 +125,10 @@ class Model:
         X = torch.stack(out)                                  # [boards, 27, nL, d]
         return {L: X[:, :, li] for li, L in enumerate(self.read_layers)}
 
-    def fit_gates(self, n_boards, seed, log=print, kind="direct", features_per_read=4):
+    def fit_gates(self, n_boards, seed, log=print, features_per_read=4):
         """Fit one read per (unit, digit, layer): "is this digit in this line?", read at the
-        line end. Trained on boards the loop never uses.
-        kind "direct": a fitted direction on the model's raw state.
-        kind "sae": built from the model's own autoencoder features (self.saes must be set)."""
+        line end, built from the model's own autoencoder features (self.saes must be set).
+        Trained on boards the loop never uses."""
         rng = random.Random(seed)
         boards = [sudoku.make_board(rng, {}) for _ in range(n_boards)]
         texts = [prompt27(b["board"], b["r"], b["c"]) for b in boards]
@@ -136,38 +142,28 @@ class Model:
         for u, unit in enumerate(("ROW", "COL", "BOX")):
             ls = list(range(9 * u, 9 * u + 9))
             for li, L in enumerate(self.read_layers):
-                if kind == "sae":                       # take out "which line this is" (see line_means)
-                    feats = (X[:, ls, li] - self.line_means[L][ls]).reshape(-1, X.shape[-1])
-                else:
-                    feats = X[:, ls, li].reshape(-1, X.shape[-1])
+                # take out "which line this is" (see line_means)
+                feats = (X[:, ls, li] - self.line_means[L][ls]).reshape(-1, X.shape[-1])
                 for d in range(1, 10):
                     y = torch.tensor([d in lines(b["board"])[l] for b in boards for l in ls])
-                    if kind == "sae":
-                        self.gates[unit, d, L] = sae_lib.fit_read(self.saes[L], feats, y, features_per_read)
-                    else:
-                        g, thr, acc = fit_probe(feats[y], feats[~y])
-                        self.gates[unit, d, L] = (g, thr, acc)
+                    self.gates[unit, d, L] = sae_lib.fit_read(self.saes[L], feats, y, features_per_read)
         report = []
         for unit in ("ROW", "COL", "BOX"):
             for L in self.read_layers:
-                accs = [read_accuracy(self.gates[unit, d, L]) for d in range(1, 10)]
+                accs = [self.gates[unit, d, L]["acc"] for d in range(1, 10)]
                 report.append(f"read {unit} at layer {L}: mean held-out accuracy {sum(accs) / 9:.2f} "
                               f"(lowest digit {min(accs):.2f})")
-        if kind == "sae":
-            for unit in ("ROW", "COL", "BOX"):
-                L = self.read_layers[0]
-                report.append(f"read {unit} at layer {L}, digit 5, uses the model's features "
-                              f"{self.gates[unit, 5, L]['ids'].tolist()}")
+        for unit in ("ROW", "COL", "BOX"):
+            L = self.read_layers[0]
+            report.append(f"read {unit} at layer {L}, digit 5, uses the model's features "
+                          f"{self.gates[unit, 5, L]['ids'].tolist()}")
         return report
 
     def read_value(self, gate, x, L, memo, line=None):
         """A read's answer for state x at layer L, at line `line` (0-26): > 0 means "the digit is there"."""
-        if isinstance(gate, dict):                      # built from autoencoder features
-            if L not in memo:
-                memo[L] = self.saes[L].encode(x - self.line_means[L][line])
-            return float(memo[L][gate["ids"]] @ gate["w"] - gate["thr"])
-        g, thr, _ = gate                                # a direction on the raw state
-        return float(x @ g - thr)
+        if L not in memo:
+            memo[L] = self.saes[L].encode(x - self.line_means[L][line])
+        return float(memo[L][gate["ids"]] @ gate["w"] - gate["thr"])
 
     def state(self):
         return dict(gates=self.gates, state_size=self.state_size, read_layers=self.read_layers,

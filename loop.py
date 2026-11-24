@@ -78,12 +78,12 @@ def load_model(cfg, a):
 def fit_gates(m, cfg):
     """The read instructions: one read per (unit, digit, layer), "is this digit in this line?".
     Fitted once per model on boards never used for scoring, and saved.
-    With reads.kind "sae", Qwen first reads many board prompts and a sparse autoencoder learns
-    its own features at each read layer; each read is then built from a few of those features."""
+    Qwen first reads many board prompts and a sparse autoencoder learns its own features at
+    each read layer; each read is then built from a few of those features."""
     import sae as sae_lib
-    reads = cfg.get("reads", {"kind": "direct"})
+    reads = cfg["reads"]
     name = os.path.basename(cfg["model_path"].rstrip("/"))
-    path = f"gates_cache/{name}_{reads['kind']}.pt"
+    path = f"gates_cache/{name}_sae.pt"
     recipe = dict(layers=cfg["read_layers"], n=cfg["gate_boards"], reads=reads)
     os.makedirs("gates_cache", exist_ok=True)
     if os.path.exists(path):
@@ -92,40 +92,39 @@ def fit_gates(m, cfg):
             m.load_state(saved["state"])
             log(f"reads loaded from {path}")
             return
-    if reads["kind"] == "sae":
-        tag = f"{name}_{reads['sae_boards']}boards"
-        states_path = f"gates_cache/{tag}_line_end_states.pt"
-        states = None
-        for L in cfg["read_layers"]:
-            sae_path = f"gates_cache/{tag}_layer{L}_{reads['dict_size']}x{reads['k']}_{reads['steps']}steps.pt"
-            if os.path.exists(sae_path):
-                v = torch.load(sae_path, weights_only=False)
-                a = sae_lib.SAE(v["d"], v["n"], v["k"]); a.load_state_dict(v["weights"])
-                m.saes[L], m.line_means[L] = a.eval(), v["line_means"]
-                log(f"autoencoder for layer {L} loaded")
-                continue
-            check_time()
-            if states is None:
-                if os.path.exists(states_path):
-                    states = torch.load(states_path)
-                else:
-                    log(f"Qwen reads {reads['sae_boards']} board prompts for the autoencoders")
-                    states = m.line_end_states(reads["sae_boards"], seed=777, log=log)
-                    torch.save(states, states_path)
-            X = states[L].float()                               # [boards, 27, d]
-            line_means = X.mean(0)                              # the average state at each line end
-            data = (X - line_means).reshape(-1, X.shape[-1])     # what's left: what is on the line
-            log(f"training the autoencoder for layer {L} on {len(data)} line-end states")
-            a, stats = sae_lib.train_sae(data, reads["dict_size"], reads["k"], reads["steps"],
-                                         batch=256, lr=3e-3, device=m.device, log=log, standardize=False)
-            log(f"  layer {L}: explains {stats['explained']:.0%} of held-out variance; {stats['dead']:.0%} of features "
-                f"never fired")
-            torch.save(dict(d=a.dec.weight.shape[0], n=a.enc.weight.shape[0], k=a.k, weights=a.state_dict(),
-                            line_means=line_means, stats=stats), sae_path)
-            m.saes[L], m.line_means[L] = a, line_means
+    tag = f"{name}_{reads['sae_boards']}boards"
+    states_path = f"gates_cache/{tag}_line_end_states.pt"
+    states = None
+    for L in cfg["read_layers"]:
+        sae_path = f"gates_cache/{tag}_layer{L}_{reads['dict_size']}x{reads['k']}_{reads['steps']}steps.pt"
+        if os.path.exists(sae_path):
+            v = torch.load(sae_path, weights_only=False)
+            a = sae_lib.SAE(v["d"], v["n"], v["k"]); a.load_state_dict(v["weights"])
+            m.saes[L], m.line_means[L] = a.eval(), v["line_means"]
+            log(f"autoencoder for layer {L} loaded")
+            continue
+        check_time()
+        if states is None:
+            if os.path.exists(states_path):
+                states = torch.load(states_path)
+            else:
+                log(f"Qwen reads {reads['sae_boards']} board prompts for the autoencoders")
+                states = m.line_end_states(reads["sae_boards"], seed=777, log=log)
+                torch.save(states, states_path)
+        X = states[L].float()                               # [boards, 27, d]
+        line_means = X.mean(0)                              # the average state at each line end
+        data = (X - line_means).reshape(-1, X.shape[-1])     # what's left: what is on the line
+        log(f"training the autoencoder for layer {L} on {len(data)} line-end states")
+        a, stats = sae_lib.train_sae(data, reads["dict_size"], reads["k"], reads["steps"],
+                                     batch=256, lr=3e-3, device=m.device, log=log, standardize=False)
+        log(f"  layer {L}: explains {stats['explained']:.0%} of held-out variance; {stats['dead']:.0%} of features "
+            f"never fired")
+        torch.save(dict(d=a.dec.weight.shape[0], n=a.enc.weight.shape[0], k=a.k, weights=a.state_dict(),
+                        line_means=line_means, stats=stats), sae_path)
+        m.saes[L], m.line_means[L] = a, line_means
     check_time()
-    log(f"fitting the reads ({reads['kind']})")
-    for line in m.fit_gates(cfg["gate_boards"], seed=12345, log=log, kind=reads["kind"],
+    log("fitting the reads")
+    for line in m.fit_gates(cfg["gate_boards"], seed=12345, log=log,
                             features_per_read=reads.get("features_per_read", 4)):
         log(" ", line)
     torch.save(dict(recipe=recipe, state=m.state()), path)

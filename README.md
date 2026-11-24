@@ -119,7 +119,7 @@ In the earlier run, the model wrote the full row, column and box program in gene
 ./run.sh --model qwen3-8b   # the bigger model (~16 GB of memory)
 ```
 
-The first time, `run.sh` sets up Python in `.venv` and installs `requirements.txt`. It uses the Mac's GPU and loads models from the local Hugging Face cache. Settings for the detectors are under `reads` in `config.yaml`; `kind: direct` switches back to the probe detectors.
+The first time, `run.sh` sets up Python in `.venv` and installs `requirements.txt`. It uses the Mac's GPU and loads models from the local Hugging Face cache. Settings for the detectors are under `reads` in `config.yaml`.
 
 ## files
 
@@ -132,5 +132,4 @@ The first time, `run.sh` sets up Python in `.venv` and installs `requirements.tx
 | `lang.py` | The program language: parse, print, check limits, run, mutate, recombine. |
 | `config.yaml` | All settings: model, layers, limits, boards, loop, fitness weights. |
 | `sudoku.py` | Boards, a plain solver, board sets saved to files. |
-| `probes.py` | Device choice and probe fitting. |
-| `sae.py` | The sparse autoencoder, and building a detector from its features. |
+| `sae.py` | The sparse autoencoder, and building a detector from its features: pick the features, then fit weights and a threshold on them. |

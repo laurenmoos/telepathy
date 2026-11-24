@@ -16,7 +16,6 @@ import math
 import torch
 import torch.nn as nn
 
-from probes import fit_probe
 
 
 class SAE(nn.Module):
@@ -96,6 +95,26 @@ def train_sae(X, n, k, steps, batch=1024, lr=1e-3, device="cpu", log=print, stan
     return sae, dict(explained=explained, dead=(fired == 0).float().mean().item(), dropped=dropped)
 
 
+def fit_weights(T, F, steps=300):
+    """Logistic regression on standardized inputs, folded to one direction + threshold.
+    T: rows where the digit is present, F: rows where it isn't. Holds out the last 20% of
+    each for the reported accuracy."""
+    nT, nF = int(len(T) * .8), int(len(F) * .8)
+    X = torch.cat([T[:nT], F[:nF]]); y = torch.cat([torch.ones(nT), torch.zeros(nF)])
+    mu, sd = X.mean(0), X.std(0) + 1e-6
+    w = torch.zeros(X.shape[1], requires_grad=True); b = torch.zeros(1, requires_grad=True)
+    opt = torch.optim.Adam([w, b], lr=0.01)
+    wpos = (len(y) - y.sum()) / y.sum()                       # balance the classes
+    for _ in range(steps):
+        opt.zero_grad()
+        loss = torch.nn.functional.binary_cross_entropy_with_logits(
+            ((X - mu) / sd) @ w + b, y, pos_weight=wpos) + 1e-3 * w.pow(2).sum()
+        loss.backward(); opt.step()
+    g = (w / sd).detach(); thr = ((mu * g).sum() - b).item()
+    acc = (((T[nT:] @ g) > thr).float().mean() + ((F[nF:] @ g) <= thr).float().mean()).item() / 2
+    return g, thr, acc
+
+
 @torch.no_grad()
 def fit_read(sae, states, present, m):
     """One read from the model's own features. states: [lines, d] at line ends; present: bool [lines].
@@ -103,9 +122,9 @@ def fit_read(sae, states, present, m):
     fits weights and a threshold on those. Returns the read, with its held-out accuracy."""
     F = sae.encode(states.float())
     T, N = F[present], F[~present]
-    nT, nN = int(len(T) * 0.8), int(len(N) * 0.8)              # fit_probe holds out the last 20%
+    nT, nN = int(len(T) * 0.8), int(len(N) * 0.8)              # fit_weights holds out the last 20%
     sep = (T[:nT].mean(0) - N[:nN].mean(0)) / (torch.cat([T[:nT], N[:nN]]).std(0) + 1e-6)
     ids = sep.abs().topk(m).indices
     with torch.enable_grad():
-        w, thr, acc = fit_probe(T[:, ids], N[:, ids])
+        w, thr, acc = fit_weights(T[:, ids], N[:, ids])
     return dict(ids=ids, w=w, thr=thr, acc=acc)
