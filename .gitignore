@@ -6,3 +6,4 @@ gates_cache/
 .venv/
 _to_delete/
 checkpoint.pt
+.worktrees/

@@ -11,7 +11,14 @@ strength_range: [0.0, 0.5]   # write strength, as a fraction of the model's typi
 limits:
   max_size: 12               # instructions as written
   max_executed: 60           # instructions run, with each for counted 9 times
-gate_boards: 64              # boards used to fit the read gates (never used for scoring)
+gate_boards: 64              # boards used to fit the reads (never used for scoring)
+reads:                       # how the read instructions are built
+  kind: sae                  # sae: from the model's own autoencoder features; direct: a probe on the raw state
+  sae_boards: 512            # board prompts Qwen reads to train the autoencoders (27 line ends each)
+  dict_size: 1024            # features per layer
+  k: 32                      # features active per line end
+  steps: 4000                # autoencoder training steps
+  features_per_read: 16      # how many of the model's features each read may combine (picked with labels)
 
 boards:
   tune: 8                    # every program is scored on these, every generation

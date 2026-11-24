@@ -22,7 +22,12 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, StoppingCriteria, StoppingCriteriaList
 
 import sudoku
+import sae as sae_lib
 from probes import fit_probe, pick_device
+
+
+def read_accuracy(gate):
+    return gate["acc"] if isinstance(gate, dict) else gate[2]
 
 
 def box_of(r, c):
@@ -59,7 +64,9 @@ class Model:
         self.write_dir = w / w.norm(dim=1, keepdim=True)     # one push direction per digit
         self.final_norm = self.model.model.norm
         self.cache = {}                                      # prompt text -> recorded state
-        self.gates = {}                                      # (unit, digit, layer) -> (direction, threshold, accuracy)
+        self.gates = {}                                      # (unit, digit, layer) -> a read (see read_value)
+        self.saes = {}                                       # layer -> sparse autoencoder, when reads use it
+        self.line_means = {}                                 # layer -> [27, d] average state at each line end
         self.state_size = None
         self._last = None
         self.model.model.layers[-1].register_forward_hook(self._grab)
@@ -97,9 +104,25 @@ class Model:
 
     # ------------------------------------------------------------ gates
 
-    def fit_gates(self, n_boards, seed, log=print):
-        """Fit one gate per (unit, digit, layer): "is this digit in this line?", read at the
-        line end. Trained on boards the loop never uses."""
+    @torch.no_grad()
+    def line_end_states(self, n_boards, seed, log=print, batch=16):
+        """Qwen reads n_boards board prompts. Returns its state at the end of every line, per
+        read layer, for training the autoencoders: {layer: [boards, 27, d]} in float16."""
+        rng = random.Random(seed)
+        boards = [sudoku.make_board(rng, {}) for _ in range(n_boards)]
+        texts = [prompt27(b["board"], b["r"], b["c"]) for b in boards]
+        out = []
+        for i in range(0, len(texts), batch):
+            out += [a.to(torch.float16) for a, _ in self._forward(texts[i:i + batch], batch=batch)]
+            log(f"  autoencoder boards {min(i + batch, len(texts))}/{len(texts)}")
+        X = torch.stack(out)                                  # [boards, 27, nL, d]
+        return {L: X[:, :, li] for li, L in enumerate(self.read_layers)}
+
+    def fit_gates(self, n_boards, seed, log=print, kind="direct", features_per_read=4):
+        """Fit one read per (unit, digit, layer): "is this digit in this line?", read at the
+        line end. Trained on boards the loop never uses.
+        kind "direct": a fitted direction on the model's raw state.
+        kind "sae": built from the model's own autoencoder features (self.saes must be set)."""
         rng = random.Random(seed)
         boards = [sudoku.make_board(rng, {}) for _ in range(n_boards)]
         texts = [prompt27(b["board"], b["r"], b["c"]) for b in boards]
@@ -113,24 +136,51 @@ class Model:
         for u, unit in enumerate(("ROW", "COL", "BOX")):
             ls = list(range(9 * u, 9 * u + 9))
             for li, L in enumerate(self.read_layers):
-                feats = X[:, ls, li].reshape(-1, X.shape[-1])
+                if kind == "sae":                       # take out "which line this is" (see line_means)
+                    feats = (X[:, ls, li] - self.line_means[L][ls]).reshape(-1, X.shape[-1])
+                else:
+                    feats = X[:, ls, li].reshape(-1, X.shape[-1])
                 for d in range(1, 10):
                     y = torch.tensor([d in lines(b["board"])[l] for b in boards for l in ls])
-                    g, thr, acc = fit_probe(feats[y], feats[~y])
-                    self.gates[unit, d, L] = (g, thr, acc)
+                    if kind == "sae":
+                        self.gates[unit, d, L] = sae_lib.fit_read(self.saes[L], feats, y, features_per_read)
+                    else:
+                        g, thr, acc = fit_probe(feats[y], feats[~y])
+                        self.gates[unit, d, L] = (g, thr, acc)
         report = []
         for unit in ("ROW", "COL", "BOX"):
             for L in self.read_layers:
-                accs = [self.gates[unit, d, L][2] for d in range(1, 10)]
-                report.append(f"gate {unit} at layer {L}: mean held-out accuracy {sum(accs) / 9:.2f} "
+                accs = [read_accuracy(self.gates[unit, d, L]) for d in range(1, 10)]
+                report.append(f"read {unit} at layer {L}: mean held-out accuracy {sum(accs) / 9:.2f} "
                               f"(lowest digit {min(accs):.2f})")
+        if kind == "sae":
+            for unit in ("ROW", "COL", "BOX"):
+                L = self.read_layers[0]
+                report.append(f"read {unit} at layer {L}, digit 5, uses the model's features "
+                              f"{self.gates[unit, 5, L]['ids'].tolist()}")
         return report
 
+    def read_value(self, gate, x, L, memo, line=None):
+        """A read's answer for state x at layer L, at line `line` (0-26): > 0 means "the digit is there"."""
+        if isinstance(gate, dict):                      # built from autoencoder features
+            if L not in memo:
+                memo[L] = self.saes[L].encode(x - self.line_means[L][line])
+            return float(memo[L][gate["ids"]] @ gate["w"] - gate["thr"])
+        g, thr, _ = gate                                # a direction on the raw state
+        return float(x @ g - thr)
+
     def state(self):
-        return dict(gates=self.gates, state_size=self.state_size, read_layers=self.read_layers)
+        return dict(gates=self.gates, state_size=self.state_size, read_layers=self.read_layers,
+                    saes={L: dict(d=s.dec.weight.shape[0], n=s.enc.weight.shape[0], k=s.k, weights=s.state_dict())
+                          for L, s in self.saes.items()}, line_means=self.line_means)
 
     def load_state(self, s):
         self.gates, self.state_size = s["gates"], s["state_size"]
+        self.saes, self.line_means = {}, s.get("line_means", {})
+        for L, v in s.get("saes", {}).items():
+            a = sae_lib.SAE(v["d"], v["n"], v["k"])
+            a.load_state_dict(v["weights"])
+            self.saes[L] = a.eval()
 
     # ------------------------------------------------------------ running programs
 
@@ -151,9 +201,11 @@ class Model:
         at_ends, last = self.cache[prompt27(grid, r, c)]
         li = {L: i for i, L in enumerate(self.read_layers)}
 
+        memos = {u: {} for u in ("ROW", "COL", "BOX")}   # autoencoder features, computed once per line
+
         def read_gate(unit, d, L):
-            g, thr, _ = self.gates[unit, d, L]
-            return float(at_ends[("ROW", "COL", "BOX").index(unit), li[L]] @ g - thr)
+            x = at_ends[("ROW", "COL", "BOX").index(unit), li[L]]
+            return self.read_value(self.gates[unit, d, L], x, L, memos[unit], line_index(unit, r, c))
 
         h = last.clone()
         for d, s in prog_run(read_gate):
