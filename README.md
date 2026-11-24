@@ -69,7 +69,7 @@ After several rounds, we test the best program on boards it has never seen. We c
 
 ## results
 
-Qwen3-0.6B, 6 generations, 12 programs per generation, scored on 8 practice boards. Two runs: one with detectors from the autoencoder features, one with the earlier detectors (a linear probe fit directly on the model's notes).
+Qwen3-0.6B, 6 generations, 12 programs per generation, scored on 8 practice boards. The latest run uses the autoencoder detectors. The earlier run, with probe detectors fit directly on the model's notes, is shown for comparison.
 
 Boards solved:
 
@@ -77,26 +77,30 @@ Boards solved:
 | --- | --- | --- |
 | No program | 0% | 0% |
 | Rule in words | 0% | 0% |
-| **Our program, autoencoder detectors** | **67%** | **0%** |
-| **Our program, probe detectors** | **92%** | **25%** |
+| **Our program, autoencoder detectors (latest)** | **67%** | **0%** |
+| Our program, probe detectors (earlier) | 92% | 25% |
 
-Cells right: with autoencoder detectors our program gets 85% on held-out and 59% on hard boards; with probe detectors, 97% and 77%. Both baselines stay at 14% or below.
+Cells right: in the latest run our program gets 85% on held-out and 59% on hard boards, against 97% and 77% with probe detectors. Both baselines stay at 14% or below.
 
-The autoencoder detectors are right about 85% of the time at layer 1, against 95–98% for the probes, which accounts for most of the gap.
+The autoencoder detectors are right about 85% of the time at layer 1, against 95–98% for the probes. That accounts for most of the gap.
 
-Best program, autoencoder detectors (recombined and mutated in generation 4):
+**Best program each generation, latest run** (practice boards)
+
+| Generation | Boards solved | Cells right | Where it came from |
+| --- | --- | --- | --- |
+| 0 | 25% | 41% | random |
+| 1 | 63% | 83% | recombined and mutated |
+| 2 to 5 | 63% | 89% | written by the model, then recombined and mutated |
+
+Best program, latest run:
 
 ```
 (seq (for v (read BOX v 1) (read COL v 2)) (for v (read COL v 1)) (read ROW 9 1) (write 0.20))
 ```
 
-Best program, probe detectors (recombined and mutated in generation 5):
+It checks every digit in the box and the column, but only the digit 9 in the row.
 
-```
-(seq (for v (read ROW v 1) (read BOX v 1)) (write 0.50))
-```
-
-In the probe run, the model wrote the full row, column and box program in generation 0, and it solved all 8 practice boards from generation 1 on:
+In the earlier run, the model wrote the full row, column and box program in generation 0, and it solved all 8 practice boards from generation 1 on:
 
 ```
 (seq (for v (read BOX v 1) (read COL v 2) (read ROW v 1)) (write 0.34))
