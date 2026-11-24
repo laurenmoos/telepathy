@@ -274,8 +274,6 @@ def test_on_new_boards(best, boards, m, label, save=None):
     """The best program on boards it has never seen, next to baselines."""
     programs = {
         "no program": lang.parse("(seq)"),
-        "hand-written: row only": lang.parse("(seq (for v (read ROW v 2)) (write 0.10))"),
-        "hand-written: row, col, box": lang.parse("(seq (for v (read ROW v 2) (read COL v 2) (read BOX v 2)) (write 0.10))"),
         "best found": best,
     }
     report = {}

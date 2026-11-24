@@ -34,7 +34,7 @@ Each line is one function in `loop.py`.
 
 **Scoring.** Boards fully solved, then empty cells right, then moves that broke no sudoku rule, minus a small cost per instruction.
 
-**Testing.** The best program on held-out boards, and on harder boards with 10-20 empty cells, next to: the model told the sudoku rule in words with no program, no program at all, a hand-written program that reads only the row, and a hand-written program that reads the row, column and box.
+**Testing.** The best program on held-out boards, and on harder boards with 10-20 empty cells, next to two baselines: the model told the sudoku rule in words with no program, and no program at all. Every program in the loop is written by the model or comes from recombining and mutating its programs (plus a few random ones at the start). None are written by hand.
 
 ## How the model sees a board
 
@@ -52,12 +52,6 @@ The prompt has 27 lines of 9 digits (0 = empty): the 9 rows, then the 9 columns,
 
 A gate is a fitted direction plus a threshold in the model's state, fitted once per model on separate boards. The write push follows the model's own output weights for that digit, added at its last layer.
 
-Example: read every digit in the row, column and box, then write the missing one.
-
-```
-(seq (for v (read ROW v 2) (read COL v 2) (read BOX v 2)) (write 0.10))
-```
-
 ## Files
 
 | File | What it is |
@@ -71,14 +65,14 @@ Example: read every digit in the row, column and box, then write the missing one
 | `sudoku.py` | Boards, a plain solver (fills every cell where only one digit fits), board sets saved to files. |
 | `probes.py` | Device choice and gate fitting. |
 
-## Results so far (Qwen3-0.6B, earlier runs on a CPU)
+## Results so far (Qwen3-0.6B on the Mac's GPU, `--generations 0`)
 
-| Program | Held-out boards solved | Empty cells right |
+This run only wrote the first programs and tested the best one, with no generations of improvement.
+
+| | Test boards (2-5 empty cells): solved / cells right | Harder boards (10-20 empty): solved / cells right |
 |---|---|---|
-| No program | 0% | 13% |
-| Rule in words, no program (14 other boards) | 0% | 6% |
-| Hand-written, row only | 33% | 61% |
-| Hand-written, row, column and box | 100% | 100% |
-| Best found by the loop (4 generations) | 67% | 87% |
+| Rule in words, no program | 0% / 11% | 0% / 14% |
+| No program | 0% / 13% | 0% / 8% |
+| Best of the first programs | 83% / 95% | 0% / 59% |
 
 The gates read "is this digit in this line?" at 93-98% accuracy at layers 1 and 2, for rows, columns and boxes alike.

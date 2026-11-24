@@ -14,8 +14,6 @@ pushes the model toward a digit when it answers.
                                  lowest evidence (the one that looks most missing). Does nothing
                                  if nothing has been read yet.
 
-Example: read all nine digits in the row, then write the missing one.
-    (seq (for v (read ROW v 2)) (write 0.1))
 """
 import copy, random
 from dataclasses import dataclass, field
@@ -102,6 +100,8 @@ def parse(text):
             return s
         if head == "for":
             expect("v")
+            if toks[pos:pos + 2] == ["1", "9"]:       # also accept (for v 1 9 ...)
+                nxt(); nxt()
             return For(body())
         if head == "seq":
             return Prog(body())

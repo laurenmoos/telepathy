@@ -20,9 +20,7 @@ Instructions:
   (write STRENGTH)         push the model toward the digit that looks most missing so far.
                            STRENGTH is between {lo} and {hi}.
 
-Examples:
-  (seq (read ROW 5 2) (read ROW 7 2) (write 0.10))
-  (seq (for v (read BOX v 3)))
+A program looks like (seq ...) with instructions inside, for example (seq (read COL 3 2) (write 0.20)).
 
 A program is scored on many boards: boards fully solved, cells right, sudoku rules kept.
 Shorter programs score a little higher. Reply with exactly one program on one line, nothing else.
