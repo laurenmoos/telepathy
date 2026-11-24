@@ -1,0 +1,42 @@
+# Settings for loop.py: one model writes programs in the program language (lang.py)
+# that steer itself through sudoku boards.
+
+models:
+  qwen3-0.6b: Qwen/Qwen3-0.6B
+  qwen3-8b:   Qwen/Qwen3-8B
+model: qwen3-0.6b         # the one model: it writes the programs and runs them
+
+read_layers: [1, 2, 3, 4]    # layers a read may use; earlier layers read lines most cleanly
+strength_range: [0.0, 0.5]   # write strength, as a fraction of the model's typical state size
+limits:
+  max_size: 12               # instructions as written
+  max_executed: 60           # instructions run, with each for counted 9 times
+gate_boards: 64              # boards used to fit the read gates (never used for scoring)
+
+boards:
+  tune: 8                    # every program is scored on these, every generation
+  test: 24                   # held out until the end
+  blanks: [2, 5]             # empty cells per board
+  hard: {n: 12, blanks: [10, 20]}   # a second held-out set with many more empty cells
+  seed: 0
+  dir: boards
+
+evolution:
+  generations: 6
+  population: 12
+  keep: 4                    # best programs carried over unchanged
+  writing_sessions: 3        # per generation: the model writes, sees the run, revises
+  turns: 3                   # turns per writing session
+  trial_boards: 3            # practice boards each draft is tested on inside a session
+  show_best: 5               # best programs (with scores) shown to the model when it writes
+  # the rest of the population comes from recombining and mutating the best programs
+  mutation_rate: 0.9
+  crossover_rate: 0.4
+  tournament: 3
+  seed: 0
+
+fitness:
+  solved: 1.0
+  cells_right: 0.5
+  legal: 0.25
+  per_instruction: 0.005

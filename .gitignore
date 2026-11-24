@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+primitives_cache/
+gates_cache/
+*_checkpoint.pt
+.venv/
+_to_delete/
+checkpoint.pt
