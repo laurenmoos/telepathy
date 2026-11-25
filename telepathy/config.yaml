@@ -54,6 +54,8 @@ agent:                       # the coding loop (agent.py): search for a scoring 
   temperature: 0.7
   think: false               # Qwen3 thinking before each program
   max_tokens: 700            # per program
+  examples: 1                # fixed and broken cells shown with their traces, of each
+  show_failed: 3             # recent attempts that were not better, shown when improving
   seed: 0
 
 prompts:                     # every text a writer sees; {name} fields are filled in by the code
@@ -151,6 +153,13 @@ prompts:                     # every text a writer sees; {name} fields are fille
       ```
       What happened when it ran:
       {feedback}
+      {failed}
 
-      Write an improved version that gets more cells right. Keep what works; change what broke
+      Write a different program that gets more cells right. Keep what works; change what broke
       cells or did nothing. Reply with only the code, in one ```python block.
+    failed: "These recent attempts were not better:"
+    failed_one: |-
+      {right} cells right:
+      ```python
+      {code}
+      ```

@@ -3,8 +3,9 @@
     1. Search: the writer generates fresh programs until one gets more practice cells right
        than no program (or agent.fresh_tries run out).
     2. Improve: the writer sees the kept program and what happened when it ran (cells right,
-       what each line did, fixed and broken cells with their traces) and writes an improved
-       version. It is run and kept only if it gets more cells right. Repeat agent.steps times.
+       what each line did, a fixed and a broken cell with their traces), and its recent attempts
+       that were not better, and writes an improved version. A program already tried is not run
+       again. A new one is run and kept only if it gets more cells right. Repeat agent.steps times.
 At the end the kept program is checked on the practice and held-out boards.
 
 Every text the writer sees is in config.yaml under prompts.agent. Today the steered model is
@@ -54,14 +55,18 @@ def main(argv=None):
     n = len(cells.cells)
     log(f"no program: {plain} of {n} practice cells right")
     writer = Writer(cfg["models"].get(ac["writer"], ac["writer"]), ac)
-    history = []
+    history, tried = [], {}                    # tried: code -> cells right (None if it does not compile)
 
     def attempt(stage, prompt):
         code = writer.program(prompt)
+        if code in tried:
+            history.append(dict(stage=stage, prompt=prompt, code=code, right=tried[code], feedback="already tried"))
+            return code, "tried", ""
         try:
-            feedback, right = cells.run(code, count=0)
+            feedback, right = cells.run(code, count=0, examples=ac["examples"])
         except ValueError as e:
             feedback, right = f"It does not compile: {e}", None
+        tried[code] = right
         history.append(dict(stage=stage, prompt=prompt, code=code, right=right, feedback=feedback))
         json.dump(history, open(f"{a.out}/session.json", "w"), indent=1)
         return code, right, feedback
@@ -70,7 +75,7 @@ def main(argv=None):
     for i in range(1, ac["fresh_tries"] + 1):
         code, right, feedback = attempt("search", p["base"] + "\n\n" + p["fresh"])
         log(f"search {i}: {right if right is not None else 'does not compile'} right (no program {plain})")
-        if right is not None and right > kept_right:
+        if right not in (None, "tried") and right > kept_right:
             kept, kept_right, kept_feedback = code, right, feedback
             break
     if kept is None:
@@ -78,16 +83,25 @@ def main(argv=None):
         return
     log(f"kept, {kept_right} right:\n" + kept)
 
+    failed = []                                # recent attempts that were not better: (code, right)
     for i in range(1, ac["steps"] + 1):
+        recent = "\n".join(p["failed_one"].format(right=r if r is not None else "does not compile", code=c)
+                           for c, r in failed[-ac["show_failed"]:])
         prompt = p["base"] + "\n\n" + p["improve"].format(right=kept_right, cells=n, plain=plain, code=kept,
-                                                         feedback=kept_feedback)
+                                                         feedback=kept_feedback,
+                                                         failed=(p["failed"] + "\n" + recent) if recent else "")
         code, right, feedback = attempt("improve", prompt)
+        if right == "tried":
+            log(f"improve {i}: a program already tried, not run")
+            continue
         keep = right is not None and right > kept_right
         log(f"improve {i}: {right if right is not None else 'does not compile'} right, "
             f"{'kept' if keep else 'not kept'} (kept {max(kept_right, right or 0)})")
         if keep:
             kept, kept_right, kept_feedback = code, right, feedback
             log("kept:\n" + kept)
+        else:
+            failed.append((code, right))
 
     open(f"{a.out}/program.py", "w").write(kept + "\n")
     log(f"kept program, {kept_right} of {n} practice cells right:\n" + kept)
