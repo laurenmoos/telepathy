@@ -107,7 +107,7 @@ def valid(prog):
 
 
 def schedule(prog):
-    """Where each instruction runs in the forward pass. Returns (steps, skipped).
+    """Where each instruction runs in the forward pass.
     steps is {layer: [instruction, ...]} in run order. Each instruction is a tuple whose third item
     is its guards, ((decision id, branch), ...): it runs only on boards where those decisions
     chose those branches.
@@ -119,11 +119,17 @@ def schedule(prog):
         ("record", word, ())               keep the word's value now, for a later read of it
     A read (load, add, note) of a word whose layer the pass has already left uses the value
     recorded at that layer: later writes cannot change an earlier layer. Its tuple has a 4th
-    item, "recorded". skipped lists (op, word) for writes at a layer the pass had already left."""
-    steps, skipped, ids = {}, [], [0]
+    item, "recorded". skipped lists (op, word, source line, its layer, the layer the pass was at)
+    for writes at a layer the pass had already left.
+    lines maps id(instruction tuple) -> its source line, for instructions compiled from Python
+    (programs/python.py tags them); it is empty for the old language.
+    Returns (steps, skipped, lines)."""
+    steps, skipped, ids, lines = {}, [], [0], {}
 
-    def add(L, ins):
+    def add(L, ins, src=None):
         steps.setdefault(L, []).append(ins)
+        if getattr(src, "line", None) is not None:
+            lines[id(ins)] = src.line
 
     def go(stmts, guards, at):
         for s in stmts:
@@ -134,17 +140,17 @@ def schedule(prog):
                     add(at, (s.op, s.word, guards, "recorded"))
                     continue
                 if L < at:
-                    skipped.append((s.op, s.word))
+                    skipped.append((s.op, s.word, getattr(s, "line", None), L, at))
                     continue
                 at = L
-                add(L, (s.op, s.word, guards))
+                add(L, (s.op, s.word, guards), s)
             elif isinstance(s, Scale):
                 add(at, ("scale", s.c, guards))
             elif isinstance(s, Const):
                 add(at, ("const", s.c, guards))
             elif isinstance(s, If):
                 i = ids[0]; ids[0] += 1
-                add(at, ("if", s.c, guards, i))
+                add(at, ("if", s.c, guards, i), s)
                 at = max(go(s.then, guards + ((i, 0),), at), go(s.other, guards + ((i, 1),), at))
             elif isinstance(s, Switch):
                 Ls = [WORD_LAYERS[w] for w in s.words]
@@ -156,14 +162,14 @@ def schedule(prog):
                     else:
                         add(WORD_LAYERS[w], ("note", w, guards, (i, j)))
                 at = max(at, max(Ls))
-                add(at, ("switch", len(s.words), guards, i))
+                add(at, ("switch", len(s.words), guards, i), s)
                 at = max(go(b, guards + ((i, j),), at) for j, b in enumerate(s.branches))
         return at
 
     go(prog.stmts, (), 0)
     for L in steps:                       # within a layer: records, notes, the switch, then the rest in order
         steps[L].sort(key=lambda ins: {"record": 0, "note": 1, "switch": 2}.get(ins[0], 3))
-    return steps, skipped
+    return steps, skipped, lines
 
 
 def writes(prog):

@@ -122,6 +122,11 @@ prompts:                     # every text a writer sees; {name} fields are fille
       model fills in one empty cell of a sudoku board. The goal is a program that makes the model
       answer more cells correctly.
 
+      The model answers with a digit from 1 to 9: it gives each digit a score and picks the
+      highest. Writing to a word shifts those scores. Reading a word tells you something about
+      what the model saw on this cell. A good program uses what it reads on each cell to decide
+      which write to make, so that the model's answer moves to the right digit.
+
       The program reads and writes numbers inside the model, called words. A word's value on a cell
       is 0 when typical, and +1 or -1 when unusual. The model reads the board as 27 lines (rows,
       columns, boxes), then the target cell, then answers. The words are:
@@ -152,41 +157,52 @@ prompts:                     # every text a writer sees; {name} fields are fille
       The program runs forward through the model's layers with it.{layers} A word cannot be
       written after the model has passed its layer; the trace says when that happens.
 
-      The trace. For each cell, run shows what the program did, in order:
+      Feedback. Every run reports the cells right against no program, how many cells it fixed and
+      broke, and which digits the answers changed to. Then, for each line of the program, what it
+      did on this run:
+        line 2  if row_end[15] > 1.0:   true on 23 of 96 cells (values -2.10 to +3.00)
+        line 3  answer[7] = 3.0         ran on 23 cells; answers changed on 19 (to 7: 19); fixed 6, broke 1
+      Then example cells it fixed and broke, with their traces.
+
+      The trace. For each cell, the trace shows what the program did, in order:
         set answer[2]: -0.61 -> +3.00              the word read -0.61 before, and +3.00 after
         if: +0.53 > 0.00 is true                   the value compared, and which branch ran
         argmax: row_end[1] +0.20, ...; best == 1   each word's value, and the branch that ran
         nothing is written, so Qwen is unchanged   the program wrote nothing on this cell
 
-      Your workspace has three files: program.py, your program; notes.md, for your notes; and
-      best.py, which the system keeps: the code that got the most cells right so far. Your thinking
-      is not kept between tool calls, so write what you learn in notes.md.
-      Work like an experimenter: run small pieces of code to learn what words do, write what you
-      learn in notes.md, and build program.py from it. Run program.py to test it.
+      Your workspace has two files: program.py, your program, and notes.md, for your notes. When
+      you write program.py, it runs at once, and the new version is kept only if it gets more
+      cells right than the kept version. Otherwise program.py goes back to the kept version. Either
+      way you see the feedback. So program.py is always your best program so far: build on it.
+      Your thinking is not kept between tool calls, so write what you learn in notes.md.
+      Use run to try a piece of code without changing program.py.
       Keep each step short. You have many tool calls; try many small things.
 
       There are {cells} practice cells. With no program, the model gets {right} of them right.
-      You have {calls} tool calls. At the end, best.py is checked on new boards.
+      You have {calls} tool calls. At the end, program.py is checked on new boards.
       Call submit to end early.
     first: "Begin."
     no_tool: "Call a tool."
     tools:
       read_file:
-        description: "Read a file in your workspace: program.py, notes.md or best.py."
+        description: "Read a file in your workspace: program.py or notes.md."
         parameters:
-          path: {type: string, description: "program.py, notes.md or best.py"}
+          path: {type: string, description: "program.py or notes.md"}
         required: [path]
       write_file:
-        description: "Replace the whole content of a file in your workspace: program.py or notes.md."
+        description: >-
+          Replace the whole content of program.py or notes.md. A new program.py runs at once and
+          is kept only if it gets more cells right; you see its feedback either way.
         parameters:
           path: {type: string, description: "program.py or notes.md"}
           content: {type: string, description: "the new content of the file"}
         required: [path, content]
       run:
         description: >-
-          Run Python code inside the model on the practice cells. With no code, run program.py.
-          Returns the cells right, compared with no program: how many cells it fixed and broke,
-          which digits the answers changed to, examples of fixed and broken cells, and some rows.
+          Try Python code inside the model on the practice cells, without changing program.py.
+          With no code, run program.py. Returns the cells right, compared with no program: how
+          many cells it fixed and broke, which digits the answers changed to, what each line did,
+          examples of fixed and broken cells, and some rows.
           Each row shows the model's answer, the right answer, its answer with no program, and
           the trace of what the program did on that cell.
         parameters:
@@ -195,6 +211,6 @@ prompts:                     # every text a writer sees; {name} fields are fille
           count: {type: integer, description: "number of cell rows to return (default 8)"}
         required: []
       submit:
-        description: "End the session. best.py is then checked on new boards."
+        description: "End the session. program.py is then checked on new boards."
         parameters: {}
         required: []

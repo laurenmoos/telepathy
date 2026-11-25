@@ -172,15 +172,22 @@ def _load(lin, node):
     return out
 
 
+def _tag(ins, node):
+    """Mark an instruction with its source line, for the per-line profile of a run."""
+    ins.line = node.lineno
+    return ins
+
+
 def _store(word, v, node):
+    st = _tag(lang.Op("store", word), node)
     if isinstance(v, (int, float)):
-        return [lang.Const(float(v)), lang.Op("store", word)]
+        return [lang.Const(float(v)), st]
     lin = _lin(v, node)
     if lin.terms and lin.const:
         _err(node, "a word can be set to a number or to a sum of words, not both at once")
     if not lin.terms:
-        return [lang.Const(lin.const), lang.Op("store", word)]
-    return _load(lin, node) + [lang.Op("store", word)]
+        return [lang.Const(lin.const), st]
+    return _load(lin, node) + [st]
 
 
 def _cond(node, env, then, other):
@@ -209,7 +216,7 @@ def _cond(node, env, then, other):
         d = _lin(a, node) + _lin(b, node).scale(-1)
         if not d.terms:
             _err(node, "this comparison has no word in it")
-        return _load(Lin(d.terms), node) + [lang.If(-d.const, then, other)]
+        return _load(Lin(d.terms), node) + [_tag(lang.If(-d.const, then, other), node)]
     if isinstance(node, ast.Constant) and isinstance(node.value, bool):
         return then if node.value else other
     _err(node, f"an if needs a comparison, like row_end[3] > 0.5, not {ast.unparse(node)}")
@@ -256,7 +263,7 @@ def _stmt(node, env):
                 _err(node, f"{t.id} cannot be replaced")
             if isinstance(v, Choice):
                 v = Choice(v.words)
-                sw = lang.Switch(list(v.words), [[] for _ in v.words])
+                sw = _tag(lang.Switch(list(v.words), [[] for _ in v.words]), node)
                 v.switch = sw
                 env[t.id] = v
                 return [sw]

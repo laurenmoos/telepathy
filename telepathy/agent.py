@@ -2,17 +2,19 @@
 
 The writer (an LLM) is the agent. Every text it sees, including the tool descriptions, is in
 config.yaml under prompts.agent. Its workspace is <out>/workspace, with two files:
-    program.py   the program (Python, compiled by programs/python.py)
+    program.py   the program (Python, compiled by programs/python.py). Every write to it runs at
+                 once on the practice cells and is kept only if more cells are right; otherwise
+                 the file goes back to the kept version. So program.py is always the best so far.
     notes.md     its own notes; its thinking is not kept between calls, so this is its memory
-    best.py      kept by the harness: the code with the most practice cells right so far
 Tools:
     read_file(path), write_file(path, content)   the two workspace files
     run(code, first, count)    run code (or program.py, when code is empty) inside the steered
-                               model on the practice cells; returns raw rows per cell: the
-                               model's answer, the right answer, and the trace
+                               model on the practice cells, without changing program.py; returns
+                               cells right against no program, what each line did, and example
+                               cells with their traces (eval/practice.py)
     submit()                   end the session
 The harness only executes calls and returns their output. It ends at submit or when the
-writer runs out of calls; then best.py is checked on the practice and held-out boards.
+writer runs out of calls; then program.py is checked on the practice and held-out boards.
 Each reply has a thinking budget; when it runs out, the thinking is closed and the writer
 gives its tool call.
 
@@ -31,8 +33,7 @@ from .setup.log import log
 from .setup.settings import settings, load_model, load_words
 from .sudoku.boards import make_boards
 
-FILES = ("program.py", "notes.md", "best.py")
-WRITABLE = ("program.py", "notes.md")
+FILES = ("program.py", "notes.md")
 
 
 def tools(p):
@@ -65,8 +66,6 @@ class Workspace:
         return text if text else f"({name} is empty)"
 
     def write(self, name, content):
-        if name not in WRITABLE:
-            raise ValueError(f"{name} is kept by the harness; you can write {' and '.join(WRITABLE)}")
         open(self.path(name), "w").write(content)
         return f"wrote {name} ({len(content.splitlines())} lines)"
 
@@ -134,7 +133,7 @@ def main(argv=None):
     chat = [{"role": "system", "content": system}, {"role": "user", "content": p["first"]}]
     writer = Writer(cfg["models"].get(ac["writer"], ac["writer"]), ac, tools(p))
     ws = Workspace(f"{a.out}/workspace")
-    best, best_right, done = "", plain, False
+    kept, kept_right, done = "", plain, False
     history = []
     for call in range(1, ac["calls"] + 1):
         text = writer.reply(chat)
@@ -152,6 +151,23 @@ def main(argv=None):
                 if name == "read_file":
                     result = ws.read(args["path"])
                     log(f"call {call}: read_file {args['path']}")
+                elif name == "write_file" and args.get("path") == "program.py":
+                    new = args["content"]
+                    try:
+                        feedback, right = cells.run(new)
+                    except ValueError as e:
+                        feedback, right = f"error: {e}", None
+                    keep = right is not None and right > kept_right
+                    if keep:
+                        result = f"Kept: {right} cells right (the kept version had {kept_right}).\n" + feedback
+                        kept, kept_right = new, right
+                        ws.write("program.py", new)
+                    else:
+                        result = ((f"Not kept: {right} cells right, not more than the kept version's {kept_right}."
+                                   if right is not None else "Not kept.")
+                                  + " program.py is back to the kept version.\n" + feedback)
+                    log(f"call {call}: write_file program.py, {right} right, {'kept' if keep else 'not kept'}"
+                        f" (kept {kept_right})\n    " + new.replace("\n", "\n    "))
                 elif name == "write_file":
                     result = ws.write(args["path"], args["content"])
                     log(f"call {call}: write_file {args['path']}\n    " + args["content"].replace("\n", "\n    "))
@@ -159,16 +175,11 @@ def main(argv=None):
                     code = args.get("code") or ""
                     source = code if code.strip() else open(ws.path("program.py")).read()
                     result, right = cells.run(source, int(args.get("first", 0)), int(args.get("count", 8)))
-                    if right > best_right:
-                        best, best_right = source, right
-                        open(ws.path("best.py"), "w").write(best)
-                        result += f"\nNew best: {right} cells right. This code is saved as best.py."
-                    else:
-                        result += f"\nBest so far: {best_right} cells right (best.py)."
-                    log(f"call {call}: run {'code' if code.strip() else 'program.py'}, {right} right (best {best_right})\n    "
+                    result += f"\nThe kept program.py has {kept_right} cells right."
+                    log(f"call {call}: run {'code' if code.strip() else 'program.py'}, {right} right (kept {kept_right})\n    "
                         + source.replace("\n", "\n    "))
                 elif name == "submit":
-                    done, result = True, "ended; best.py will be checked"
+                    done, result = True, "ended; program.py will be checked"
                     log(f"call {call}: submit")
                 else:
                     result = args if name == "error" else f"there is no tool {name}"
@@ -181,12 +192,12 @@ def main(argv=None):
         if done:
             break
 
-    if not best:
+    if not kept:
         log(f"no program beat no program ({plain} of {len(cells.cells)} practice cells right)")
         return
-    open(f"{a.out}/best.py", "w").write(best)
-    log(f"best program, {best_right} of {len(cells.cells)} practice cells right:\n" + best)
-    log("check:\n" + check.text(check.check(m, compile_python(best), practice_boards, test_boards)))
+    open(f"{a.out}/program.py", "w").write(kept)
+    log(f"kept program, {kept_right} of {len(cells.cells)} practice cells right:\n" + kept)
+    log("check:\n" + check.text(check.check(m, compile_python(kept), practice_boards, test_boards)))
 
 
 if __name__ == "__main__":

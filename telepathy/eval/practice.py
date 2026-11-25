@@ -73,8 +73,8 @@ class Cells:
         prog = compile_python(code)
         if lang.count(prog.stmts) > 5000:
             raise ValueError("the program is too long (over 5000 instructions once loops are unrolled)")
-        out = run(self.m, [(*c[:3], prog) for c in self.cells])
-        digits = [d for d, _, _ in out]
+        out = run(self.m, [(*c[:3], prog) for c in self.cells], events=True)
+        digits = [d for d, _, _, _ in out]
         right = sum(d == c[3] for d, c in zip(digits, self.cells))
         plain = sum(p == c[3] for p, c in zip(self.plain, self.cells))
         fixed = [i for i, (d, p, c) in enumerate(zip(digits, self.plain, self.cells)) if d == c[3] != p]
@@ -88,6 +88,8 @@ class Cells:
         lines = [f"{right} of {len(self.cells)} cells right (no program: {plain}). Fixed {len(fixed)}, broke {len(broke)}.",
                  f"Answers changed on {sum(moved.values())} cells" + (": " + ", ".join(
                      f"to {d}: {k}" for d, k in sorted(moved.items(), key=lambda t: -t[1])) if moved else "") + "."]
+        lines += profile(code, [o[3] for o in out], digits, self.plain, [c[3] for c in self.cells],
+                         lang.schedule(prog)[1])
         if fixed:
             lines += ["Fixed, for example:"] + [row(i) for i in fixed[:examples]]
         if broke:
@@ -96,3 +98,49 @@ class Cells:
             lines += [f"Rows {first} to {min(first + count, len(self.cells)) - 1}:"] + [
                 row(i) for i in range(first, min(first + count, len(self.cells)))]
         return "\n".join(lines), right
+
+
+def profile(code, events, digits, plain, right, skipped=()):
+    """What each line of the program did on this run, measured over the cells:
+    an if: on how many cells it was true, and the range of the value it compared;
+    an argmax: how often each word was the largest;
+    a write: on how many cells it ran, which digits the answers moved to on those cells
+    (against no program), and how many of those cells it fixed and broke;
+    a write that never ran because the model had passed its layer: which layers."""
+    src = code.splitlines()
+    by = {}
+    for cell, ev in enumerate(events):
+        for line, kind, info in ev:
+            by.setdefault(line, (kind, []))[1].append((cell, info))
+    out = []
+    for line in sorted(by):
+        kind, hits = by[line]
+        cells = sorted({c for c, _ in hits})
+        text = src[line - 1].strip() if line - 1 < len(src) else ""
+        if kind == "if":
+            vals = [v for _, (v, _) in hits]
+            true = sum(t for _, (_, t) in hits)
+            what = f"true on {true} of {len(hits)} cells (values {min(vals):+.2f} to {max(vals):+.2f})"
+        elif kind == "argmax":
+            n = {}
+            for _, b in hits:
+                n[b] = n.get(b, 0) + 1
+            what = "largest: " + ", ".join(f"word {b}: {k}" for b, k in sorted(n.items())) + " cells"
+        else:
+            moved = {}
+            for c in cells:
+                if digits[c] != plain[c]:
+                    moved[digits[c]] = moved.get(digits[c], 0) + 1
+            fixed = sum(digits[c] == right[c] != plain[c] for c in cells)
+            broke = sum(plain[c] == right[c] != digits[c] for c in cells)
+            what = (f"ran on {len(cells)} cells; answers changed on {sum(moved.values())}"
+                    + (" (" + ", ".join(f"to {d}: {k}" for d, k in sorted(moved.items(), key=lambda t: -t[1])) + ")"
+                       if moved else "") + f"; fixed {fixed}, broke {broke}")
+        out.append((line, f"line {line}  {text[:60]:<60}  {what}"))
+    for op, w, line, L, at in skipped:
+        if line is not None and line not in by:
+            text = src[line - 1].strip() if line - 1 < len(src) else ""
+            out.append((line, f"line {line}  {text[:60]:<60}  never ran: {lang.WORD_TO_NAME.get(w, w)} is at layer {L}, "
+                              f"and the program had already reached layer {at}"))
+    out = [t for _, t in sorted(set(out))]
+    return (["What each line did:"] + out) if out else []

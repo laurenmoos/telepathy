@@ -10,36 +10,41 @@ from ..sudoku.prompt import prompt27
 
 
 @torch.no_grad()
-def run(m, items, batch=16):
+def run(m, items, batch=16, events=False):
     """Run programs inside Qwen's forward pass. items: (grid, r, c, program).
     Returns (digit, trace, scores) per item: trace lists what each instruction did; scores
     are the 9 digit scores. A program that changes nothing gets Qwen's plain answer
     (m.prepare() first). If and argmax are decided per board: an instruction runs only where
-    its branch was taken."""
+    its branch was taken.
+    With events, each item also gets a 4th entry: (source line, kind, info) for every if,
+    argmax and write that ran and came from a Python line: ("if", (value, true)),
+    ("argmax", best), ("write", (before, after))."""
     out = [None] * len(items)
     todo = []
     for j, (g, r, c, prog) in enumerate(items):
-        steps, skipped = lang.schedule(prog)
-        note = [f"skipped {op} {lang.WORD_TO_NAME.get(w, w)} (its layer had already run)" for op, w in skipped]
+        steps, skipped, lines = lang.schedule(prog)
+        note = [f"skipped {op} {lang.WORD_TO_NAME.get(w, w)} (its layer had already run)" for op, w, *_ in skipped]
         if any(ins[0] in ("store", "clear") for lst in steps.values() for ins in lst):
-            todo.append((j, steps, note))
+            todo.append((j, steps, note, lines))
         else:
             plain = m.cache[prompt27(g, r, c)]
-            out[j] = (int(plain.argmax()) + 1, note + ["nothing is written, so Qwen is unchanged"], plain)
+            out[j] = (int(plain.argmax()) + 1, note + ["nothing is written, so Qwen is unchanged"], plain) + (
+                ([],) if events else ())
     for i in range(0, len(todo), batch):
         chunk = todo[i:i + batch]
-        enc, pos = m.encode([items[j][:3] for j, _, _ in chunk])
+        enc, pos = m.encode([items[j][:3] for j, _, _, _ in chunk])
         acc = [0.0] * len(chunk)
         decided = [{} for _ in chunk]                # if / argmax id -> the branch this board took
         notes = [{} for _ in chunk]                  # argmax id -> {candidate: (word, value)}
         recorded = [{} for _ in chunk]               # word -> its value when its layer ran
-        trace = [list(note) for _, _, note in chunk]
-        layers = sorted({L for _, steps, _ in chunk for L in steps})
+        ev = [[] for _ in chunk]                     # (source line, kind, info), for events
+        trace = [list(note) for _, _, note, _ in chunk]
+        layers = sorted({L for _, steps, _, _ in chunk for L in steps})
 
         def at_layer(L):
             def hook(mod, inp, o):
                 t = (o[0] if isinstance(o, tuple) else o).clone()
-                for n, (j, steps, _) in enumerate(chunk):
+                for n, (j, steps, _, lines) in enumerate(chunk):
                     g, r, c, _ = items[j]
                     now = lambda w: m.value(m.word(w), t[n, pos[n][m.word(w)["place"]]], r, c)
                     value = lambda w, ins=None: recorded[n][w] if ins is not None and ins[-1] == "recorded" else now(w)
@@ -58,6 +63,8 @@ def run(m, items, batch=16):
                             decided[n][ins[3]] = 0 if acc[n] > ins[1] else 1
                             trace[n].append(f"if: {acc[n]:+.2f} > {ins[1]:.2f} is "
                                             + ("true" if decided[n][ins[3]] == 0 else "false"))
+                            if id(ins) in lines:
+                                ev[n].append((lines[id(ins)], "if", (acc[n], decided[n][ins[3]] == 0)))
                         elif op == "note":
                             notes[n].setdefault(ins[3][0], {})[ins[3][1]] = (ins[1], value(ins[1], ins))
                         elif op == "switch":
@@ -66,6 +73,8 @@ def run(m, items, batch=16):
                             decided[n][ins[3]] = best
                             trace[n].append("argmax: " + ", ".join(f"{name(w)} {v:+.2f}" for _, (w, v) in sorted(got.items()))
                                             + f"; best == {best}")
+                            if id(ins) in lines:
+                                ev[n].append((lines[id(ins)], "argmax", best))
                         elif op == "load":
                             acc[n] = value(ins[1], ins)
                         elif op == "add":
@@ -76,6 +85,8 @@ def run(m, items, batch=16):
                             target = acc[n] if op == "store" else 0.0
                             t[n, pos[n][p["place"]]] += ((target - v) * p["sd"] * p["u"].to(t.device, torch.float32)).to(t.dtype)
                             trace[n].append(f"{'set' if op == 'store' else 'clear'} {name(ins[1])}: {v:+.2f} -> {target:+.2f}")
+                            if id(ins) in lines:
+                                ev[n].append((lines[id(ins)], "write", (v, target)))
                 return (t,) + tuple(o[1:]) if isinstance(o, tuple) else t
             return hook
         hooks = [m.layers[L].register_forward_hook(at_layer(L)) for L in layers]
@@ -84,6 +95,6 @@ def run(m, items, batch=16):
         finally:
             for h in hooks:
                 h.remove()
-        for n, (j, _, _) in enumerate(chunk):
-            out[j] = (int(lg[n].argmax()) + 1, trace[n], lg[n])
+        for n, (j, _, _, _) in enumerate(chunk):
+            out[j] = (int(lg[n].argmax()) + 1, trace[n], lg[n]) + ((ev[n],) if events else ())
     return out
