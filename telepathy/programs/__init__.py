@@ -1,1 +1,1 @@
-"""Programs: the language, running them in the model, playing boards, writing and checking them."""
+"""Programs: the language, running them in the model, and writing them (loop.py)."""

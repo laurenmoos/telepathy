@@ -3,7 +3,7 @@
     play(progs, boards, m)   every program fills every board, cell by cell; wrong digits stay in
     summarize(moves)         boards solved and cells right
 """
-from .run import run
+from ..programs.run import run
 
 
 def play(progs, boards, m):

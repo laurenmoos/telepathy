@@ -7,7 +7,7 @@ A program file holds statements in the program language (lang.py).
 """
 import sys
 
-from . import lang
+from ..programs import lang
 from .play import play, summarize
 
 

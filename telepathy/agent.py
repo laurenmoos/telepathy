@@ -16,8 +16,9 @@ query its own activations.
 """
 import json, os, random, re
 
-from .programs import check, lang
-from .programs.run import run
+from .eval import check
+from .eval.practice import Cells
+from .programs import lang
 from .setup.log import log
 from .setup.settings import settings, load_model, load_words
 from .sudoku.boards import make_boards
@@ -32,26 +33,6 @@ def tools(p):
                          "count": {"type": "integer", "description": p["run_count"]}}, ["code"]),
             tool("submit", {"code": {"type": "string", "description": p["submit_code"]}}, ["code"])]
 
-
-class Cells:
-    """The practice cells, and running code on them with the full trace."""
-
-    def __init__(self, m, boards, n, rng):
-        cells = [(b["board"], r, c, b["solution"][r][c]) for b in boards for r in range(9) for c in range(9)
-                 if b["board"][r][c] == 0]
-        self.m, self.cells = m, rng.sample(cells, min(n, len(cells)))
-        m.prepare([c[:3] for c in self.cells])
-
-    def run(self, code, first=0, count=24):
-        statements = lang.split_statements(code) if code.strip() else []
-        prog = lang.compile_program(statements)
-        if not lang.valid(prog):
-            raise ValueError("the program is too long")
-        out = run(self.m, [(*c[:3], prog) for c in self.cells])
-        right = sum(d == c[3] for (d, _, _), c in zip(out, self.cells))
-        rows = [f"cell {i}: answered {d}, right {c[3]}" + (f"; {'; '.join(tr)}" if tr else "")
-                for i, ((d, tr, _), c) in enumerate(zip(out, self.cells))][first:first + count]
-        return f"{right} of {len(self.cells)} cells right.\n" + "\n".join(rows), right
 
 
 class Writer:

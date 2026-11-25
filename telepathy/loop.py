@@ -3,13 +3,14 @@
     ./run.sh [--set write.sessions=2] [--set write.writer=qwen3-8b-4bit] [--out runs/write]
 
 At the end, the best program from all sessions is checked on the practice and held-out boards
-(programs/check.py). What one step does is in programs/write.py; who writes is in
+(eval/check.py). What one step does is in programs/write.py; who writes is in
 programs/writers.py.
 """
 import json, os, random
 
-from .programs import check, lang
-from .programs.practice import Practice
+from .eval import check
+from .eval.practice import Practice
+from .programs import lang
 from .programs.write import act, word_table
 from .programs.writers import FileWriter, MLXWriter, ModelWriter
 from .setup.log import log

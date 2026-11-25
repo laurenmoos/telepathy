@@ -5,6 +5,7 @@
     setup/      settings, logging, loading the model and its words
     model/      the frozen model: loading, its state at word places, replies
     words/      finding the words: answer words and board words
-    programs/   the program language, running programs, writing and checking them
+    programs/   the program language, running programs, writing them
+    eval/       scoring programs: practice cells, playing boards, the check on held-out boards
     sudoku/     boards, the board prompt, the board sets
 """
