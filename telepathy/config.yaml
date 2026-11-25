@@ -129,21 +129,50 @@ prompts:                     # every text a writer sees; {name} fields are fille
       answer words sit where the model gives its answer.
       You do not know what each word means. Find out with the run tool.
 
-      Statements:
-        set(W, EXPR)                set word W to EXPR. EXPR is a number like 2.00, or words with
-                                    factors, like 0.50 * row_end[3] - col_end[7].
-        clear(W)                    set word W back to 0.
-        if EXPR > X:                run the indented lines if EXPR > X on this board (X from -2 to 2),
-            set(...) or clear(...)
-        else:                       otherwise these (optional).
-            set(...) or clear(...)
-        best = argmax(W1, W2, ...)  which of these 2 to 9 words is largest on this board,
-        if best == 0:               then run the lines under its number.
-            set(...) or clear(...)
-        elif best == 1:
-            set(...) or clear(...)
-      The program runs forward through the model's layers: a statement can only read words at the same
-      layer as, or an earlier layer than, the words it writes.{layers}
+      The language. A program is a list of statements. They run in order, once per cell.
+        set(W, EXPR)      Move the model's state so that word W reads EXPR on this cell.
+                          Later statements that read W see the new value.
+        clear(W)          The same as set(W, 0.00).
+      EXPR is either a number from -8.00 to 8.00, or a sum of words, each with an optional factor
+      (any nonzero number up to 64): row_end[3], 2.00 * col_end[7] - 0.50 * box_end[1].
+      Inside a program, a word in an EXPR means that word's value on the current cell.
+
+        if EXPR > X:      X is a number from -2.00 to 2.00. On cells where EXPR > X the lines
+            LINES         under "if" run; on the others the lines under "else" run.
+        else:             The else part is optional.
+            LINES
+
+        best = argmax(W0, W1, ...)   2 to 9 different words. best is the position (counting from
+        if best == 0:                0) of the word with the largest value on this cell. Only the
+            LINES                    lines under the matching number run. A number with no lines
+        elif best == 1:              does nothing. Every "if best == k" must come right after its
+            LINES                    argmax line.
+
+      LINES are one or more set(...) or clear(...) lines indented by 4 spaces. An if or argmax
+      cannot be nested inside another. There are no other statements, variables or comments.
+
+      Example (the word numbers here are arbitrary):
+        set(answer[3], 2.00)
+        if row_end[5] - 0.50 * col_end[2] > 1.00:
+            set(answer[0], -1.50)
+        else:
+            clear(answer[0])
+        best = argmax(box_end[4], box_end[9], col_end[11])
+        if best == 0:
+            set(answer[6], 3.00)
+        elif best == 2:
+            set(answer[1], -3.00)
+            set(answer[2], 1.00)
+
+      Layers. The program runs forward through the model's layers with it: a statement can only
+      read words at the same layer as, or an earlier layer than, the words it writes. A statement
+      that breaks this is skipped, and the trace says so.{layers}
+
+      The trace. For each cell, run shows what each statement did, in order:
+        set answer[2]: -0.61 -> +3.00              the word read -0.61 before, and +3.00 after
+        if: +0.53 > 0.00 is true                   the value of EXPR, and which branch ran
+        argmax: row_end[1] +0.20, ...; best == 1   each word's value, and the branch that ran
+        nothing is written, so Qwen is unchanged   the program wrote nothing on this cell
 
       Work like an experimenter. First learn what single words do: run one statement at a time,
       for example one word set to a large positive or negative value, and compare the rows with
