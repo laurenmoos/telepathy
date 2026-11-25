@@ -48,10 +48,11 @@ write:                       # the writing loop (loop.py)
 
 agent:                       # the tool-calling writer (agent.py)
   writer: qwen3-8b-4bit
-  calls: 40                  # the writer's replies, each with tool calls
+  calls: 30                  # the writer's replies, each with tool calls
   cells: 96                  # practice cells each run is scored on
   temperature: 0.6
-  max_tokens: 6000           # per reply, thinking included
+  think_tokens: 1500         # thinking budget per reply; then the thinking is closed
+  answer_tokens: 1500        # for the tool call after the thinking
   seed: 0
 
 prompts:                     # every text a writer sees; {name} fields are filled in by the code
@@ -157,20 +158,23 @@ prompts:                     # every text a writer sees; {name} fields are fille
         argmax: row_end[1] +0.20, ...; best == 1   each word's value, and the branch that ran
         nothing is written, so Qwen is unchanged   the program wrote nothing on this cell
 
-      Your workspace has two files: program.py, your program, and notes.md, for your notes. Your
-      thinking is not kept between tool calls, so write what you learn in notes.md.
+      Your workspace has three files: program.py, your program; notes.md, for your notes; and
+      best.py, which the system keeps: the code that got the most cells right so far. Your thinking
+      is not kept between tool calls, so write what you learn in notes.md.
       Work like an experimenter: run small pieces of code to learn what words do, write what you
       learn in notes.md, and build program.py from it. Run program.py to test it.
+      Keep each step short. You have many tool calls; try many small things.
 
       There are {cells} practice cells. With no program, the model gets {right} of them right.
-      You have {calls} tool calls. Call submit when program.py is your best program.
+      You have {calls} tool calls. At the end, best.py is checked on new boards.
+      Call submit to end early.
     first: "Begin."
     no_tool: "Call a tool."
     tools:
       read_file:
-        description: "Read a file in your workspace: program.py or notes.md."
+        description: "Read a file in your workspace: program.py, notes.md or best.py."
         parameters:
-          path: {type: string, description: "program.py or notes.md"}
+          path: {type: string, description: "program.py, notes.md or best.py"}
         required: [path]
       write_file:
         description: "Replace the whole content of a file in your workspace: program.py or notes.md."
@@ -181,14 +185,16 @@ prompts:                     # every text a writer sees; {name} fields are fille
       run:
         description: >-
           Run Python code inside the model on the practice cells. With no code, run program.py.
-          Returns how many cells are right, then one row per cell: the model's answer, the right
-          answer, and the trace of what the program did on that cell.
+          Returns the cells right, compared with no program: how many cells it fixed and broke,
+          which digits the answers changed to, examples of fixed and broken cells, and some rows.
+          Each row shows the model's answer, the right answer, its answer with no program, and
+          the trace of what the program did on that cell.
         parameters:
           code: {type: string, description: "Python code to run; leave empty to run program.py"}
           first: {type: integer, description: "first cell row to return (default 0)"}
-          count: {type: integer, description: "number of cell rows to return (default 24)"}
+          count: {type: integer, description: "number of cell rows to return (default 8)"}
         required: []
       submit:
-        description: "Submit program.py as your final program. It is checked on held-out boards. This ends the session."
+        description: "End the session. best.py is then checked on new boards."
         parameters: {}
         required: []

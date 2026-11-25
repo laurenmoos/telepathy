@@ -4,15 +4,17 @@ The writer (an LLM) is the agent. Every text it sees, including the tool descrip
 config.yaml under prompts.agent. Its workspace is <out>/workspace, with two files:
     program.py   the program (Python, compiled by programs/python.py)
     notes.md     its own notes; its thinking is not kept between calls, so this is its memory
+    best.py      kept by the harness: the code with the most practice cells right so far
 Tools:
     read_file(path), write_file(path, content)   the two workspace files
     run(code, first, count)    run code (or program.py, when code is empty) inside the steered
                                model on the practice cells; returns raw rows per cell: the
                                model's answer, the right answer, and the trace
-    submit()                   program.py is the final program; it is checked on the practice
-                               and held-out boards
+    submit()                   end the session
 The harness only executes calls and returns their output. It ends at submit or when the
-writer runs out of calls.
+writer runs out of calls; then best.py is checked on the practice and held-out boards.
+Each reply has a thinking budget; when it runs out, the thinking is closed and the writer
+gives its tool call.
 
 Today the steered model is Qwen3-0.6B and the writer is another model. Later the writer will
 query its own activations.
@@ -29,7 +31,8 @@ from .setup.log import log
 from .setup.settings import settings, load_model, load_words
 from .sudoku.boards import make_boards
 
-FILES = ("program.py", "notes.md")
+FILES = ("program.py", "notes.md", "best.py")
+WRITABLE = ("program.py", "notes.md")
 
 
 def tools(p):
@@ -62,6 +65,8 @@ class Workspace:
         return text if text else f"({name} is empty)"
 
     def write(self, name, content):
+        if name not in WRITABLE:
+            raise ValueError(f"{name} is kept by the harness; you can write {' and '.join(WRITABLE)}")
         open(self.path(name), "w").write(content)
         return f"wrote {name} ({len(content.splitlines())} lines)"
 
@@ -74,18 +79,27 @@ class Writer:
         from mlx_lm.sample_utils import make_sampler
         self.model, self.wrap = load(path)
         self.sampler = make_sampler(temp=a["temperature"], top_p=0.95, top_k=20)
-        self.max_tokens, self.tools = a["max_tokens"], tools
+        self.think, self.answer, self.tools = a["think_tokens"], a["answer_tokens"], tools
 
-    def reply(self, chat):
+    def _generate(self, prompt, max_tokens, stop):
         from mlx_lm import stream_generate
-        prompt = self.wrap.apply_chat_template(chat, tools=self.tools, add_generation_prompt=True,
-                                               enable_thinking=True)
         text = ""
-        for r in stream_generate(self.model, self.wrap, prompt, max_tokens=self.max_tokens, sampler=self.sampler):
+        for r in stream_generate(self.model, self.wrap, prompt, max_tokens=max_tokens, sampler=self.sampler):
             text += r.text
-            if "</tool_call>" in text:
+            if stop in text:
                 break
         return text
+
+    def reply(self, chat):
+        """Think for at most think_tokens; if the thinking is not done by then, close it and let the
+        writer give its tool call."""
+        prompt = self.wrap.apply_chat_template(chat, tools=self.tools, add_generation_prompt=True,
+                                               enable_thinking=True)
+        text = self._generate(prompt, self.think, "</think>")
+        if "</think>" not in text:
+            text += "\n</think>\n\n"
+        prompt = prompt + self.wrap.encode(text, add_special_tokens=False)
+        return text + self._generate(prompt, self.answer, "</tool_call>")
 
 
 def tool_calls(text):
@@ -120,7 +134,8 @@ def main(argv=None):
     chat = [{"role": "system", "content": system}, {"role": "user", "content": p["first"]}]
     writer = Writer(cfg["models"].get(ac["writer"], ac["writer"]), ac, tools(p))
     ws = Workspace(f"{a.out}/workspace")
-    submitted, history = None, []
+    best, best_right, done = "", plain, False
+    history = []
     for call in range(1, ac["calls"] + 1):
         text = writer.reply(chat)
         thought, _, said = text.rpartition("</think>") if "</think>" in text else (text, "", "")
@@ -143,31 +158,35 @@ def main(argv=None):
                 elif name == "run":
                     code = args.get("code") or ""
                     source = code if code.strip() else open(ws.path("program.py")).read()
-                    result, right = cells.run(source, int(args.get("first", 0)), int(args.get("count", 24)))
-                    log(f"call {call}: run {'code' if code.strip() else 'program.py'}, {right} right\n    "
+                    result, right = cells.run(source, int(args.get("first", 0)), int(args.get("count", 8)))
+                    if right > best_right:
+                        best, best_right = source, right
+                        open(ws.path("best.py"), "w").write(best)
+                        result += f"\nNew best: {right} cells right. This code is saved as best.py."
+                    else:
+                        result += f"\nBest so far: {best_right} cells right (best.py)."
+                    log(f"call {call}: run {'code' if code.strip() else 'program.py'}, {right} right (best {best_right})\n    "
                         + source.replace("\n", "\n    "))
                 elif name == "submit":
-                    submitted = open(ws.path("program.py")).read()
-                    compile_python(submitted)
-                    result = "submitted"
+                    done, result = True, "ended; best.py will be checked"
+                    log(f"call {call}: submit")
                 else:
                     result = args if name == "error" else f"there is no tool {name}"
             except (ValueError, KeyError, IndexError, TypeError) as e:
                 result = f"error: {e}"
-                submitted = None
                 log(f"call {call}: {name}, error: {e}")
             chat.append({"role": "tool", "content": result})
             history[-1]["results"].append(result)
         json.dump(dict(system=system, log=history), open(f"{a.out}/session.json", "w"), indent=1)
-        if submitted is not None:
+        if done:
             break
 
-    if submitted is None:
-        log("no program submitted")
+    if not best:
+        log(f"no program beat no program ({plain} of {len(cells.cells)} practice cells right)")
         return
-    open(f"{a.out}/program.py", "w").write(submitted)
-    log("submitted:\n" + submitted)
-    log("check:\n" + check.text(check.check(m, compile_python(submitted), practice_boards, test_boards)))
+    open(f"{a.out}/best.py", "w").write(best)
+    log(f"best program, {best_right} of {len(cells.cells)} practice cells right:\n" + best)
+    log("check:\n" + check.text(check.check(m, compile_python(best), practice_boards, test_boards)))
 
 
 if __name__ == "__main__":
