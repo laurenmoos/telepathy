@@ -48,8 +48,9 @@ write:                       # the writing loop (loop.py)
 
 agent:                       # the coding loop (agent.py): search for a scoring program, then improve it
   writer: qwen3-8b-4bit
-  fresh_tries: 30            # fresh programs to try until one beats no program
-  steps: 20                  # improvement steps after that
+  steps: 30                  # search or improve steps in all
+  samples: 3                 # programs sampled per improve step
+  restart_after: 3           # improve steps with no gain before starting from a fresh program
   cells: 96                  # practice cells each program is run on
   temperature: 0.7
   think: false               # Qwen3 thinking before each program

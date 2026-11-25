@@ -1,11 +1,13 @@
 """A model writes a program in a standard coding loop: generate, run, verify, read the trace, improve.
 
     1. Search: the writer generates fresh programs until one gets more practice cells right
-       than no program (or agent.fresh_tries run out).
+       than no program.
     2. Improve: the writer sees the kept program and what happened when it ran (cells right,
        what each line did, a fixed and a broken cell with their traces), and its recent attempts
        that were not better, and writes an improved version. A program already tried is not run
-       again. A new one is run and kept only if it gets more cells right. Repeat agent.steps times.
+       again. Each step samples agent.samples programs and keeps the best if it gets more cells
+       right. After agent.restart_after steps with no gain, start again from step 1. The best
+       program over all restarts is the result. agent.steps steps in all.
 At the end the kept program is checked on the practice and held-out boards.
 
 Every text the writer sees is in config.yaml under prompts.agent. Today the steered model is
@@ -71,37 +73,41 @@ def main(argv=None):
         json.dump(history, open(f"{a.out}/session.json", "w"), indent=1)
         return code, right, feedback
 
-    kept, kept_right, kept_feedback = None, plain, ""
-    for i in range(1, ac["fresh_tries"] + 1):
-        code, right, feedback = attempt("search", p["base"] + "\n\n" + p["fresh"])
-        log(f"search {i}: {right if right is not None else 'does not compile'} right (no program {plain})")
-        if right not in (None, "tried") and right > kept_right:
-            kept, kept_right, kept_feedback = code, right, feedback
-            break
-    if kept is None:
-        log("no fresh program beat no program")
+    best, best_right = None, plain             # the best program over all restarts
+    kept, kept_right, kept_feedback, failed, stall = None, plain, "", [], 0
+    for step in range(1, ac["steps"] + 1):
+        if kept is None:                       # search: fresh programs until one beats no program
+            code, right, feedback = attempt("search", p["base"] + "\n\n" + p["fresh"])
+            log(f"step {step}, search: {right if right is not None else 'does not compile'} right (no program {plain})")
+            if right not in (None, "tried") and right > plain:
+                kept, kept_right, kept_feedback, failed, stall = code, right, feedback, [], 0
+                log(f"kept, {kept_right} right:\n" + kept)
+        else:                                  # improve: several samples from one prompt; keep the best if better
+            recent = "\n".join(p["failed_one"].format(right=r if r is not None else "does not compile", code=c)
+                               for c, r in failed[-ac["show_failed"]:])
+            prompt = p["base"] + "\n\n" + p["improve"].format(right=kept_right, cells=n, plain=plain, code=kept,
+                                                             feedback=kept_feedback,
+                                                             failed=(p["failed"] + "\n" + recent) if recent else "")
+            got = [attempt("improve", prompt) for _ in range(ac["samples"])]
+            new = [(c, r, f) for c, r, f in got if r not in (None, "tried")]
+            top = max(new, key=lambda t: t[1], default=None)
+            log(f"step {step}, improve: " + ", ".join(str(r) if r is not None else "error" for _, r, _ in got)
+                + f" (kept {kept_right})")
+            if top and top[1] > kept_right:
+                kept, kept_right, kept_feedback, stall = top[0], top[1], top[2], 0
+                log(f"kept, {kept_right} right:\n" + kept)
+            else:
+                failed += [(c, r) for c, r, _ in got if r != "tried"]
+                stall += 1
+                if stall >= ac["restart_after"]:
+                    log(f"no gain in {stall} steps: restart from a fresh program")
+                    kept = None
+        if kept is not None and kept_right > best_right:
+            best, best_right = kept, kept_right
+    if best is None:
+        log("no program beat no program")
         return
-    log(f"kept, {kept_right} right:\n" + kept)
-
-    failed = []                                # recent attempts that were not better: (code, right)
-    for i in range(1, ac["steps"] + 1):
-        recent = "\n".join(p["failed_one"].format(right=r if r is not None else "does not compile", code=c)
-                           for c, r in failed[-ac["show_failed"]:])
-        prompt = p["base"] + "\n\n" + p["improve"].format(right=kept_right, cells=n, plain=plain, code=kept,
-                                                         feedback=kept_feedback,
-                                                         failed=(p["failed"] + "\n" + recent) if recent else "")
-        code, right, feedback = attempt("improve", prompt)
-        if right == "tried":
-            log(f"improve {i}: a program already tried, not run")
-            continue
-        keep = right is not None and right > kept_right
-        log(f"improve {i}: {right if right is not None else 'does not compile'} right, "
-            f"{'kept' if keep else 'not kept'} (kept {max(kept_right, right or 0)})")
-        if keep:
-            kept, kept_right, kept_feedback = code, right, feedback
-            log("kept:\n" + kept)
-        else:
-            failed.append((code, right))
+    kept, kept_right = best, best_right
 
     open(f"{a.out}/program.py", "w").write(kept + "\n")
     log(f"kept program, {kept_right} of {n} practice cells right:\n" + kept)
