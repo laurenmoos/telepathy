@@ -1,48 +1,48 @@
-# Settings for loop.py: one model writes programs in the program language (lang.py)
-# that steer itself through sudoku boards.
+# Settings. A frozen model fills in sudoku cells while a program (lang.py) reads and writes
+# words inside it; a writer builds the program step by step (write.py).
 
 models:
   qwen3-0.6b: Qwen/Qwen3-0.6B
   qwen3-8b:   Qwen/Qwen3-8B
-model: qwen3-0.6b         # the one model: it writes the programs and runs them
+  coder-7b-4bit: mlx-community/Qwen2.5-Coder-7B-Instruct-4bit   # writer, runs on MLX (write.py MLXWriter)
+model: qwen3-0.6b            # the model that is steered and scored
 
-read_layers: [1, 2, 3, 4]    # layers a read may use; earlier layers read lines most cleanly
-strength_range: [0.0, 0.5]   # write strength, as a fraction of the model's typical state size
-limits:
-  max_size: 12               # instructions as written
-  max_executed: 60           # instructions run, with each for counted 9 times
-gate_boards: 64              # boards used to fit the reads (never used for scoring)
-reads:                       # how the read instructions are built
-  sae_boards: 512            # board prompts Qwen reads to train the autoencoders (27 line ends each)
-  dict_size: 1024            # features per layer
-  k: 32                      # features active per line end
-  steps: 4000                # autoencoder training steps
-  features_per_read: 16      # how many of the model's features each read may combine (picked with labels)
+words:                       # answer words (words.py): directions at the answer position, no labels
+  boards: 1024               # boards Qwen reads to find candidates
+  jac_boards: 512            # new boards for each candidate's effect on the answer (9 backward passes each)
+  check_boards: 128          # new boards to check each chosen word against random directions
+  blanks: [1, 20]            # empty cells per board
+  pool_eigen: 12             # candidates per place and layer: directions where board differences move the answer
+  pool_pcs: 12               # candidates per place and layer: directions where boards differ most
+  primitives: 8              # words chosen
+  noise: 0.1                 # as a fraction of the strongest word's effect; smaller pushes harder for variety
+  max_overlap: 0.5           # skip a word whose effect over boards has |cosine| above this with a chosen word
+  max_direct: 3              # at most this many words that act mostly straight on the output
+  controls_per_place: 2      # random directions checked the same way
+  seed: 777
 
-boards:
-  tune: 8                    # every program is scored on these, every generation
-  test: 24                   # held out until the end
-  blanks: [2, 5]             # empty cells per board
-  hard: {n: 12, blanks: [10, 20]}   # a second held-out set with many more empty cells
+reads:                       # board words (reads.py): directions at the row, column and box line ends, no labels
+  boards: 2048               # boards Qwen reads to find them
+  describe_boards: 256       # new boards to describe them
+  blanks: [1, 2]
+  components: 32             # independent components per line end and layer
+  layers: [0]
+  seed: 991
+
+boards:                      # the task
+  practice: 96               # the writer's practice boards
+  test: 64                   # held out until the check
+  blanks: [1, 2]             # empty cells per board
   seed: 0
   dir: boards
 
-evolution:
-  generations: 6
-  population: 12
-  keep: 4                    # best programs carried over unchanged
-  writing_sessions: 3        # per generation: the model writes, sees the run, revises
-  turns: 3                   # turns per writing session
-  trial_boards: 3            # practice boards each draft is tested on inside a session
-  show_best: 5               # best programs (with scores) shown to the model when it writes
-  # the rest of the population comes from recombining and mutating the best programs
-  mutation_rate: 0.9
-  crossover_rate: 0.4
-  tournament: 3
+write:                       # the writing loop (write.py)
+  writer: null               # null: the steered model writes; or a name under models, or "files"
+  sessions: 8                # writing sessions side by side
+  steps: 16                  # replies per session
+  actions: 1                 # actions allowed per reply (then DONE)
+  cells: 96                  # practice cells each action is scored on (one pass each)
+  show_words: 999            # board words shown to each session (a random subset if fewer than all)
+  temperature: 1.0
+  repetition_penalty: 1.15
   seed: 0
-
-fitness:
-  solved: 1.0
-  cells_right: 0.5
-  legal: 0.25
-  per_instruction: 0.005

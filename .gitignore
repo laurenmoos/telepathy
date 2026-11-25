@@ -7,3 +7,6 @@ gates_cache/
 _to_delete/
 checkpoint.pt
 .worktrees/
+runs/
+word_cache/
+.venv
