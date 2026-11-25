@@ -46,9 +46,8 @@ def load_words(m, cfg):
     """Give the model its words and name them for programs. Board words come first (layer 0),
     then answer words, earliest layer first."""
     from ..programs import lang
-    from ..words import answer, board
-    ws = list(answer.load(m, cfg, log=log)["primitives"]) + list(board.load(m, cfg, log=log)["reads"])
-    ws = sorted(ws, key=lambda p: (p["layer"], p["place"], p.get("rank", 0)))
+    from ..words import load
+    ws = load(m, cfg, log=log)
     m.set_words(ws)
     lang.setup(ws)
     log(f"{len(ws)} words: " + ", ".join(f"{g} {n}" for g, n in lang.GROUP_SIZE.items()))

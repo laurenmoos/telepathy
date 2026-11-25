@@ -27,12 +27,12 @@ variety of boards gives the spread.
 6. describe()   Correlate each word's reading with board facts. The facts only describe the
                 words; they are never used to find or choose them.
 
-    ./run.sh answer-words [--set words.boards=64 ...]     build (or load) the words and write the report
+    telepathy/run.sh words [--set words.boards=64 ...]     build (or load) both kinds of words
 
 Output: cache/<model>_primitives_..._logdet.pt (used by setup.settings.load_words), the cached Jacobians
 next to it (choosing again from them takes seconds), and runs/word_stage_logdet/REPORT.md.
 """
-import os, random, sys, time
+import os, random, time
 import torch
 
 from ..model.states import encode_boards, states_at
@@ -417,9 +417,3 @@ def report(out, where="runs/word_stage_logdet"):
     open(f"{where}/REPORT.md", "w").write("\n".join(L) + "\n")
     log(f"report: {where}/REPORT.md")
 
-
-if __name__ == "__main__":
-    from ..setup.settings import settings, load_model
-    cfg, a = settings(sys.argv[1:])
-    m = load_model(cfg, a)
-    load(m, cfg)

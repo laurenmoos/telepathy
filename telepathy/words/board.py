@@ -12,11 +12,11 @@ line break summarizes that line. A board word is one direction in that state, at
                many cells are empty), against a chance level from shuffled boards. The facts only
                describe the words; they never choose them.
 
-    ./run.sh board-words
+    telepathy/run.sh words     build (or load) both kinds of words
 
 Output: cache/<model>_boardwords_....pt (used by setup.settings.load_words) and runs/board_words/REPORT.md.
 """
-import os, sys
+import os
 import torch
 
 from ..model.states import states_at
@@ -129,8 +129,3 @@ def report(out, where="runs/board_words"):
     open(f"{where}/REPORT.md", "w").write("\n".join(L) + "\n")
     log(f"report: {where}/REPORT.md")
 
-
-if __name__ == "__main__":
-    from ..setup.settings import settings, load_model
-    cfg, a = settings(sys.argv[1:])
-    load(load_model(cfg, a), cfg)

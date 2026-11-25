@@ -3,9 +3,8 @@
 #
 #   telepathy/run.sh [options]                  the writing loop (loop.py)
 #   telepathy/run.sh agent [options]            the tool-calling writer (agent.py)
-#   telepathy/run.sh check <program file>       check a program (eval/check.py)
-#   telepathy/run.sh answer-words               build or load the answer words (words/answer.py)
-#   telepathy/run.sh board-words                build or load the board words (words/board.py)
+#   telepathy/run.sh check <program file>       check a program (check.py)
+#   telepathy/run.sh words [options]            build or load both kinds of words (words/)
 #
 # Options go through to Python, e.g. --set write.sessions=2 --out runs/write.
 set -e
@@ -17,8 +16,7 @@ export PYTORCH_ENABLE_MPS_FALLBACK=1   # anything the Mac's GPU can't do runs on
 
 case "$1" in
   agent)        shift; exec $PY -m telepathy.agent "$@" ;;
-  check)        shift; exec $PY -m telepathy.eval.check "$@" ;;
-  answer-words) shift; exec $PY -m telepathy.words.answer "$@" ;;
-  board-words)  shift; exec $PY -m telepathy.words.board "$@" ;;
+  check)        shift; exec $PY -m telepathy.check "$@" ;;
+  words)        shift; exec $PY -m telepathy.words "$@" ;;
   *)            exec $PY -m telepathy.loop "$@" ;;
 esac
