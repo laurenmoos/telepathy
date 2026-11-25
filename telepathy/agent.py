@@ -107,13 +107,13 @@ def main(argv=None):
                            layers=f" row_end, col_end and box_end are at layer {layers[0]}; {answer_layers}.")
     chat = [{"role": "system", "content": system}, {"role": "user", "content": p["first"]}]
     writer = Writer(cfg["models"].get(ac["writer"], ac["writer"]), ac, tools(p))
-    submitted, log = None, []
+    submitted, history = None, []
     for call in range(1, ac["calls"] + 1):
         text = writer.reply(chat)
         thought, _, said = text.rpartition("</think>") if "</think>" in text else (text, "", "")
         calls = tool_calls(said)
         chat.append({"role": "assistant", "content": said.strip()})
-        log.append(dict(call=call, thinking=thought.replace("<think>", "").strip(), reply=said.strip(), results=[]))
+        history.append(dict(call=call, thinking=thought.replace("<think>", "").strip(), reply=said.strip(), results=[]))
         if not calls:
             chat.append({"role": "user", "content": p["no_tool"]})
             log(f"call {call}: no tool call")
@@ -132,8 +132,8 @@ def main(argv=None):
                 result = f"error: {e}"
                 log(f"call {call}: {name}, error: {e}")
             chat.append({"role": "tool", "content": result})
-            log[-1]["results"].append(result)
-        json.dump(dict(system=system, log=log), open(f"{a.out}/session.json", "w"), indent=1)
+            history[-1]["results"].append(result)
+        json.dump(dict(system=system, log=history), open(f"{a.out}/session.json", "w"), indent=1)
         if submitted is not None:
             break
 
