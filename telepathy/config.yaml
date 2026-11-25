@@ -138,8 +138,10 @@ prompts:                     # every text a writer sees; {name} fields are fille
       The program. Words look like four Python lists. Reading a word gives its value on the current
       cell. Assigning to a word moves the model's state so that the word reads that value:
           answer[2] = 3.0                          # push answer[2] to +3
-          answer[0] = 0.5 * row_end[3] - col_end[7]
           answer[1] = 0                            # back to typical
+      The usual pattern is: read words to decide, then make a fixed push:
+          if row_end[3] > 1.0:                     # what the model saw on this cell
+              answer[5] = 3.0                      # a push that moves the answer
       You can use variables, if / elif / else, and / or / not, for loops over range() or lists,
       and best = argmax(w0, w1, ...), which gives the position (from 0) of the largest word, for
       use in if best == k. Example:
