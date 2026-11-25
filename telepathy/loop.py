@@ -10,7 +10,7 @@ import json, os, random
 
 from .programs import check, lang
 from .programs.practice import Practice
-from .programs.write import INSTRUCTIONS, act, word_table
+from .programs.write import act, word_table
 from .programs.writers import FileWriter, MLXWriter, ModelWriter
 from .setup.log import log
 from .setup.settings import settings, load_model, load_words
@@ -37,16 +37,15 @@ def main(argv=None):
     else:
         writer = ModelWriter(m, w)
 
-    per_reply = ("Each reply is exactly one step:" if w["actions"] == 1 else
-                 f"Each reply is up to {w['actions']} steps, one after another, then a line DONE. They run in order:")
+    p = cfg["prompts"]["loop"]
+    per_reply = p["one_action"] if w["actions"] == 1 else p["many_actions"].format(actions=w["actions"])
     board_names = [n for n in lang.NAME_TO_WORD if not n.startswith("answer")]
     sessions = []
     for i in range(w["sessions"]):
         keep = set(rng.sample(board_names, min(w["show_words"], len(board_names)))) | {
             n for n in lang.NAME_TO_WORD if n.startswith("answer")}
-        system = INSTRUCTIONS.format(words=word_table(m, keep), per_reply=per_reply)
-        first = (f"The program is empty. With no program, {practice.right(practice.plain)} of "
-                 f"{len(practice.cells)} practice cells are right.\nTake your first step.")
+        system = p["system"].format(words=word_table(m, keep), per_reply=per_reply).rstrip()
+        first = p["first"].format(right=practice.right(practice.plain), cells=len(practice.cells))
         sessions.append(dict(chat=[{"role": "system", "content": system}, {"role": "user", "content": first}],
                              program=[], digits=practice.plain, best=[], best_digits=practice.plain, log=[]))
 
@@ -55,7 +54,7 @@ def main(argv=None):
         for s, text in zip(sessions, replies):
             text = text.strip()
             results = [act(s, x, practice) for x in lang.split_reply(text, w["actions"])]
-            feedback = "\n".join(results) + f"\n\nCurrent program:\n{lang.show(s['program'])}\n\nNext step."
+            feedback = p["next"].format(results="\n".join(results), program=lang.show(s["program"]))
             s["chat"] += [{"role": "assistant", "content": text}, {"role": "user", "content": feedback}]
             s["log"].append(dict(step=step, reply=text, results=results))
         log(f"step {step}: cells right per session " + ", ".join(str(practice.right(s["digits"])) for s in sessions)

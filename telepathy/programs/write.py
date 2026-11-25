@@ -17,53 +17,6 @@ run side by side (loop.py), and each one is a conversation:
 from . import lang
 
 
-INSTRUCTIONS = """You write a small Python program that runs inside a language model, the same kind of
-model as you, while it fills in one empty cell of a sudoku board. The model reads the board's
-rows, columns and boxes, one line each, and then names the digit for the cell.
-
-Your program reads and changes a few numbers inside the model, called words. On each board a
-word has a value: 0 is typical, +1 or -1 is unusual.
-  row_end[i], col_end[i], box_end[i]: at the end of the cell's row, column and box line, at the
-      model's first layer. They show what is in that line.
-  answer[i]: where the model gives its answer, at later layers. Changing them changes the answer.
-The words, and what each one's value goes up with on real boards:
-{words}
-
-Statements:
-  set(W, EXPR)                set word W to EXPR. EXPR is a number like 2.00, or words with
-                              factors, like 0.50 * row_end[3] - col_end[7].
-  clear(W)                    set word W back to 0.
-  if EXPR > X:                run the indented lines if EXPR > X on this board (X from -2 to 2),
-      set(...) or clear(...)
-  else:                       otherwise these (optional).
-      set(...) or clear(...)
-  best = argmax(W1, W2, ...)  which of these 2 to 9 words is largest on this board,
-  if best == 0:               then run the lines under its number.
-      set(...) or clear(...)
-  elif best == 1:
-      set(...) or clear(...)
-The model runs forward through its layers, and so does your program: a statement can only read
-words at the same layer as, or an earlier layer than, the words it writes. The line words come
-first, the answer words later.
-
-You build the program one step at a time. {per_reply}
-  ADD                 add statements at the end
-  <statements>
-  END
-  REPLACE k           replace statement number k
-  <statements>
-  END
-  DELETE k            delete statement number k
-  END
-  TEST                run statements on their own, once, without changing the program
-  <statements>
-  END
-  TEST W              see word W's average value on the practice cells
-  END
-After each reply you see what each step did on the practice cells. A change that makes the
-program worse is undone. Use TEST to learn what words do, then ADD what helps.
-The goal is to get as many cells right as possible."""
-
 
 # ---------------------------------------------------------------- one action
 
