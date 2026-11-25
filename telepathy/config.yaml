@@ -135,7 +135,8 @@ prompts:                     # every text a writer sees; {name} fields are fille
       {words}
       You do not know what each word means. Find out by running code.
 
-      The program. Words look like four Python lists. Reading a word gives its value on the current
+      The program. Words look like four Python lists. The lists already exist: do not define or
+      fill them; your program only uses them. Reading a word gives its value on the current
       cell. Assigning to a word moves the model's state so that the word reads that value:
           answer[2] = 3.0                          # push answer[2] to +3
           answer[1] = 0                            # back to typical
