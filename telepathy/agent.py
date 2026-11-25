@@ -19,6 +19,7 @@ import json, os, random, re
 
 from .eval import check
 from .eval.practice import Cells
+from .programs import lang
 from .programs.python import compile_python
 from .setup.log import log
 from .setup.settings import settings, load_model, load_words
@@ -58,6 +59,14 @@ def main(argv=None):
     log(f"no program: {plain} of {n} practice cells right")
     writer = Writer(cfg["models"].get(ac["writer"], ac["writer"]), ac)
     history, tried = [], {}                    # tried: code -> cells right (None if it does not compile)
+    rng = random.Random(ac["seed"])
+    board = [w for w in lang.NAME_TO_WORD if not w.startswith("answer")]
+    answers = [w for w in lang.NAME_TO_WORD if w.startswith("answer")]
+
+    def fresh():
+        """The fresh-program prompt, naming a few random words so attempts differ."""
+        pick = rng.sample(board, ac["fresh_words"][0]) + rng.sample(answers, ac["fresh_words"][1])
+        return p["base"] + "\n\n" + p["fresh"].format(words=", ".join(pick))
 
     def attempt(stage, prompt):
         code = writer.program(prompt)
@@ -77,7 +86,7 @@ def main(argv=None):
     kept, kept_right, kept_feedback, failed, stall = None, plain, "", [], 0
     for step in range(1, ac["steps"] + 1):
         if kept is None:                       # search: fresh programs until one beats no program
-            code, right, feedback = attempt("search", p["base"] + "\n\n" + p["fresh"])
+            code, right, feedback = attempt("search", fresh())
             log(f"step {step}, search: {right if right is not None else 'does not compile'} right (no program {plain})")
             if right not in (None, "tried") and right > plain:
                 kept, kept_right, kept_feedback, failed, stall = code, right, feedback, [], 0

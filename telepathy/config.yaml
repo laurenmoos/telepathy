@@ -50,6 +50,7 @@ agent:                       # the coding loop (agent.py): search for a scoring 
   writer: qwen3-8b-4bit
   steps: 30                  # search or improve steps in all
   samples: 3                 # programs sampled per improve step
+  fresh_words: [5, 3]        # random board words and answer words named in each fresh prompt
   restart_after: 3           # improve steps with no gain before starting from a fresh program
   cells: 96                  # practice cells each program is run on
   temperature: 0.7
@@ -146,6 +147,7 @@ prompts:                     # every text a writer sees; {name} fields are fille
               answer[1] = -3.0
     fresh: |-
       Write a program that reads several of these values and sets answer values depending on them.
+      Use these: {words}.
       Reply with only the code, in one ```python block.
     improve: |-
       This program gets {right} of {cells} practice cells right (with no program: {plain}):
