@@ -7,9 +7,10 @@ from ..programs import lang
 from .play import play, summarize
 
 
-def check(m, statements, practice, test):
-    """Cells right and boards solved, with no program and with the program, on both board sets."""
-    progs = [lang.Prog([]), lang.compile_program(statements)]
+def check(m, program, practice, test):
+    """Cells right and boards solved, with no program and with the program, on both board sets.
+    program: a compiled lang.Prog, or statements in the old language."""
+    progs = [lang.Prog([]), program if isinstance(program, lang.Prog) else lang.compile_program(program)]
     out = {}
     for name, boards in (("practice", practice), ("held-out", test)):
         none, prog = (summarize(mv) for mv in play(progs, boards, m))

@@ -1,11 +1,16 @@
-"""A model writes a program by calling two tools.
+"""A model writes a program in Python, in a workspace of files, by calling tools.
 
-The writer (an LLM) is the agent. It sees the program language and the word names, and calls
-(every text it sees is in config.yaml under prompts.agent):
-    run(code, first, count)   run statements inside the steered model on the practice cells;
-                              returns one raw row per cell: the model's answer, the right
-                              answer, and the trace of what each statement did
-    submit(code)              the final program; it is checked on the practice and held-out boards
+The writer (an LLM) is the agent. Every text it sees, including the tool descriptions, is in
+config.yaml under prompts.agent. Its workspace is <out>/workspace, with two files:
+    program.py   the program (Python, compiled by programs/python.py)
+    notes.md     its own notes; its thinking is not kept between calls, so this is its memory
+Tools:
+    read_file(path), write_file(path, content)   the two workspace files
+    run(code, first, count)    run code (or program.py, when code is empty) inside the steered
+                               model on the practice cells; returns raw rows per cell: the
+                               model's answer, the right answer, and the trace
+    submit()                   program.py is the final program; it is checked on the practice
+                               and held-out boards
 The harness only executes calls and returns their output. It ends at submit or when the
 writer runs out of calls.
 
@@ -19,20 +24,46 @@ import json, os, random, re
 from .eval import check
 from .eval.practice import Cells
 from .programs import lang
+from .programs.python import compile_python
 from .setup.log import log
 from .setup.settings import settings, load_model, load_words
 from .sudoku.boards import make_boards
 
-def tools(p):
-    """The two tools, described with the texts in config.yaml (prompts.agent)."""
-    def tool(name, props, required):
-        return {"type": "function", "function": {"name": name, "description": p[name], "parameters": {
-            "type": "object", "properties": props, "required": required}}}
-    return [tool("run", {"code": {"type": "string", "description": p["run_code"]},
-                         "first": {"type": "integer", "description": p["run_first"]},
-                         "count": {"type": "integer", "description": p["run_count"]}}, ["code"]),
-            tool("submit", {"code": {"type": "string", "description": p["submit_code"]}}, ["code"])]
+FILES = ("program.py", "notes.md")
 
+
+def tools(p):
+    """The tools, as described in config.yaml (prompts.agent.tools)."""
+    return [{"type": "function", "function": {
+        "name": name, "description": t["description"],
+        "parameters": {"type": "object",
+                       "properties": {k: {"type": v["type"], "description": v["description"]}
+                                      for k, v in t.get("parameters", {}).items()},
+                       "required": t.get("required", [])}}}
+        for name, t in p["tools"].items()]
+
+
+class Workspace:
+    """The writer's files, in <out>/workspace."""
+
+    def __init__(self, where):
+        self.where = where
+        os.makedirs(where, exist_ok=True)
+        for f in FILES:
+            open(self.path(f), "w").write("")
+
+    def path(self, name):
+        if name not in FILES:
+            raise ValueError(f"there is no file {name!r}; the files are {', '.join(FILES)}")
+        return os.path.join(self.where, name)
+
+    def read(self, name):
+        text = open(self.path(name)).read()
+        return text if text else f"({name} is empty)"
+
+    def write(self, name, content):
+        open(self.path(name), "w").write(content)
+        return f"wrote {name} ({len(content.splitlines())} lines)"
 
 
 class Writer:
@@ -88,6 +119,7 @@ def main(argv=None):
                            layers=f" row_end, col_end and box_end are at layer {layers[0]}; {answer_layers}.")
     chat = [{"role": "system", "content": system}, {"role": "user", "content": p["first"]}]
     writer = Writer(cfg["models"].get(ac["writer"], ac["writer"]), ac, tools(p))
+    ws = Workspace(f"{a.out}/workspace")
     submitted, history = None, []
     for call in range(1, ac["calls"] + 1):
         text = writer.reply(chat)
@@ -98,19 +130,31 @@ def main(argv=None):
         if not calls:
             chat.append({"role": "user", "content": p["no_tool"]})
             log(f"call {call}: no tool call")
+            json.dump(dict(system=system, log=history), open(f"{a.out}/session.json", "w"), indent=1)
             continue
         for name, args in calls:
             try:
-                if name == "run":
-                    result, right = cells.run(args.get("code", ""), int(args.get("first", 0)), int(args.get("count", 24)))
-                    log(f"call {call}: run, {right} right\n    " + args.get("code", "").replace("\n", "\n    "))
+                if name == "read_file":
+                    result = ws.read(args["path"])
+                    log(f"call {call}: read_file {args['path']}")
+                elif name == "write_file":
+                    result = ws.write(args["path"], args["content"])
+                    log(f"call {call}: write_file {args['path']}\n    " + args["content"].replace("\n", "\n    "))
+                elif name == "run":
+                    code = args.get("code") or ""
+                    source = code if code.strip() else open(ws.path("program.py")).read()
+                    result, right = cells.run(source, int(args.get("first", 0)), int(args.get("count", 24)))
+                    log(f"call {call}: run {'code' if code.strip() else 'program.py'}, {right} right\n    "
+                        + source.replace("\n", "\n    "))
                 elif name == "submit":
-                    submitted = lang.split_statements(args["code"])
+                    submitted = open(ws.path("program.py")).read()
+                    compile_python(submitted)
                     result = "submitted"
                 else:
                     result = args if name == "error" else f"there is no tool {name}"
-            except (ValueError, KeyError, IndexError) as e:
+            except (ValueError, KeyError, IndexError, TypeError) as e:
                 result = f"error: {e}"
+                submitted = None
                 log(f"call {call}: {name}, error: {e}")
             chat.append({"role": "tool", "content": result})
             history[-1]["results"].append(result)
@@ -121,9 +165,9 @@ def main(argv=None):
     if submitted is None:
         log("no program submitted")
         return
-    open(f"{a.out}/program.txt", "w").write("\n".join(submitted) + "\n")
-    log("submitted:\n" + lang.show(submitted))
-    log("check:\n" + check.text(check.check(m, submitted, practice_boards, test_boards)))
+    open(f"{a.out}/program.py", "w").write(submitted)
+    log("submitted:\n" + submitted)
+    log("check:\n" + check.text(check.check(m, compile_python(submitted), practice_boards, test_boards)))
 
 
 if __name__ == "__main__":

@@ -116,7 +116,10 @@ def schedule(prog):
         ("if", C, guards, id)              decision id: branch 0 if acc > C, else branch 1
         ("note", word, guards, (id, i))    keep the word's value as switch id's i-th candidate
         ("switch", n, guards, id)          decision id: the branch of the largest candidate
-    skipped lists (op, word) for instructions at a layer the pass had already left."""
+        ("record", word, ())               keep the word's value now, for a later read of it
+    A read (load, add, note) of a word whose layer the pass has already left uses the value
+    recorded at that layer: later writes cannot change an earlier layer. Its tuple has a 4th
+    item, "recorded". skipped lists (op, word) for writes at a layer the pass had already left."""
     steps, skipped, ids = {}, [], [0]
 
     def add(L, ins):
@@ -126,6 +129,10 @@ def schedule(prog):
         for s in stmts:
             if isinstance(s, Op):
                 L = WORD_LAYERS[s.word]
+                if L < at and s.op in ("load", "add"):
+                    add(L, ("record", s.word, ()))
+                    add(at, (s.op, s.word, guards, "recorded"))
+                    continue
                 if L < at:
                     skipped.append((s.op, s.word))
                     continue
@@ -141,20 +148,21 @@ def schedule(prog):
                 at = max(go(s.then, guards + ((i, 0),), at), go(s.other, guards + ((i, 1),), at))
             elif isinstance(s, Switch):
                 Ls = [WORD_LAYERS[w] for w in s.words]
-                if min(Ls) < at:
-                    skipped.append(("argmax", " ".join(s.words)))
-                    continue
                 i = ids[0]; ids[0] += 1
                 for j, w in enumerate(s.words):
-                    add(WORD_LAYERS[w], ("note", w, guards, (i, j)))
-                at = max(Ls)
+                    if WORD_LAYERS[w] < at:
+                        add(WORD_LAYERS[w], ("record", w, ()))
+                        add(at, ("note", w, guards, (i, j), "recorded"))
+                    else:
+                        add(WORD_LAYERS[w], ("note", w, guards, (i, j)))
+                at = max(at, max(Ls))
                 add(at, ("switch", len(s.words), guards, i))
                 at = max(go(b, guards + ((i, j),), at) for j, b in enumerate(s.branches))
         return at
 
     go(prog.stmts, (), 0)
-    for L in steps:                       # within a layer: notes, then the switch, then the rest in order
-        steps[L].sort(key=lambda ins: 0 if ins[0] == "note" else 1 if ins[0] == "switch" else 2)
+    for L in steps:                       # within a layer: records, notes, the switch, then the rest in order
+        steps[L].sort(key=lambda ins: {"record": 0, "note": 1, "switch": 2}.get(ins[0], 3))
     return steps, skipped
 
 

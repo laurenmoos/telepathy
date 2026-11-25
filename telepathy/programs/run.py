@@ -32,6 +32,7 @@ def run(m, items, batch=16):
         acc = [0.0] * len(chunk)
         decided = [{} for _ in chunk]                # if / argmax id -> the branch this board took
         notes = [{} for _ in chunk]                  # argmax id -> {candidate: (word, value)}
+        recorded = [{} for _ in chunk]               # word -> its value when its layer ran
         trace = [list(note) for _, _, note in chunk]
         layers = sorted({L for _, steps, _ in chunk for L in steps})
 
@@ -40,13 +41,16 @@ def run(m, items, batch=16):
                 t = (o[0] if isinstance(o, tuple) else o).clone()
                 for n, (j, steps, _) in enumerate(chunk):
                     g, r, c, _ = items[j]
-                    value = lambda w: m.value(m.word(w), t[n, pos[n][m.word(w)["place"]]], r, c)
+                    now = lambda w: m.value(m.word(w), t[n, pos[n][m.word(w)["place"]]], r, c)
+                    value = lambda w, ins=None: recorded[n][w] if ins is not None and ins[-1] == "recorded" else now(w)
                     name = lambda w: lang.WORD_TO_NAME.get(w, w)
                     for ins in steps.get(L, []):
                         if any(decided[n].get(d) != b for d, b in ins[2]):
                             continue                                  # in a branch this board did not take
                         op = ins[0]
-                        if op == "scale":
+                        if op == "record":
+                            recorded[n][ins[1]] = now(ins[1])
+                        elif op == "scale":
                             acc[n] *= ins[1]
                         elif op == "const":
                             acc[n] = ins[1]
@@ -55,7 +59,7 @@ def run(m, items, batch=16):
                             trace[n].append(f"if: {acc[n]:+.2f} > {ins[1]:.2f} is "
                                             + ("true" if decided[n][ins[3]] == 0 else "false"))
                         elif op == "note":
-                            notes[n].setdefault(ins[3][0], {})[ins[3][1]] = (ins[1], value(ins[1]))
+                            notes[n].setdefault(ins[3][0], {})[ins[3][1]] = (ins[1], value(ins[1], ins))
                         elif op == "switch":
                             got = notes[n].get(ins[3], {})
                             best = max(got, key=lambda i: got[i][1])
@@ -63,9 +67,9 @@ def run(m, items, batch=16):
                             trace[n].append("argmax: " + ", ".join(f"{name(w)} {v:+.2f}" for _, (w, v) in sorted(got.items()))
                                             + f"; best == {best}")
                         elif op == "load":
-                            acc[n] = value(ins[1])
+                            acc[n] = value(ins[1], ins)
                         elif op == "add":
-                            acc[n] += value(ins[1])
+                            acc[n] += value(ins[1], ins)
                         else:                                         # store, clear
                             p = m.word(ins[1])
                             v = value(ins[1])

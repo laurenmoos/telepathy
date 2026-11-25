@@ -1,9 +1,10 @@
 """The practice cells: a fixed set of cells that programs are scored on, one forward pass per cell.
 
     Practice   for the writing loop (loop.py): digits per cell, and one-line comparisons
-    Cells      for the agent (agent.py): raw rows per cell, with the trace
+    Cells      for the agent (agent.py): Python programs, raw rows per cell, with the trace
 """
 from ..programs import lang
+from ..programs.python import compile_python
 from ..programs.run import run
 from ..sudoku.prompt import prompt27
 
@@ -65,10 +66,10 @@ class Cells:
         m.prepare([c[:3] for c in self.cells])
 
     def run(self, code, first=0, count=24):
-        statements = lang.split_statements(code) if code.strip() else []
-        prog = lang.compile_program(statements)
-        if not lang.valid(prog):
-            raise ValueError("the program is too long")
+        """Run Python code (programs/python.py) on every cell. Returns (text, cells right)."""
+        prog = compile_python(code)
+        if lang.count(prog.stmts) > 5000:
+            raise ValueError("the program is too long (over 5000 instructions once loops are unrolled)")
         out = run(self.m, [(*c[:3], prog) for c in self.cells])
         right = sum(d == c[3] for (d, _, _), c in zip(out, self.cells))
         rows = [f"cell {i}: answered {d}, right {c[3]}" + (f"; {'; '.join(tr)}" if tr else "")
