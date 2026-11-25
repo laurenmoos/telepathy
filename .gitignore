@@ -9,4 +9,5 @@ checkpoint.pt
 .worktrees/
 runs/
 word_cache/
+cache/
 .venv

@@ -27,56 +27,18 @@ variety of boards gives the spread.
 6. describe()   Correlate each word's reading with board facts. The facts only describe the
                 words; they are never used to find or choose them.
 
-    python words.py [--set words.boards=64 ...]     build (or load) the words and write the report
+    ./run.sh answer-words [--set words.boards=64 ...]     build (or load) the words and write the report
 
-Output: word_cache/<model>_primitives_..._logdet.pt (used by core.load_words), the cached Jacobians
+Output: cache/<model>_primitives_..._logdet.pt (used by setup.settings.load_words), the cached Jacobians
 next to it (choosing again from them takes seconds), and runs/word_stage_logdet/REPORT.md.
 """
-import json, os, random, sys, time
+import os, random, sys, time
 import torch
 
-import sudoku
-from model import box_of, prompt27
-
-PLACES = ("ANSWER", "ROW", "COL", "BOX")
-PLACE_WORDS = {"ANSWER": "answer position", "ROW": "row line end", "COL": "column line end", "BOX": "box line end"}
-
-
-def log(*x):
-    print(f"[{time.strftime('%H:%M:%S')}]", *x, flush=True)
-
-
-# ---------------------------------------------------------------- boards
-
-def boards(n, seed, blanks):
-    """Finishable boards with a random empty cell as the target."""
-    rng = random.Random(seed)
-    lo, hi = blanks
-    out = []
-    for _ in range(n):
-        b = sudoku.make_finishable_board(rng, rng.randint(lo, hi))
-        r, c = rng.choice([(r, c) for r in range(9) for c in range(9) if b["board"][r][c] == 0])
-        out.append(dict(board=b["board"], solution=b["solution"], r=r, c=c))
-    return out
-
-
-def line_of(place, r, c):
-    """Which line of its kind the place belongs to (0 for the answer position)."""
-    return {"ANSWER": 0, "ROW": r, "COL": c, "BOX": box_of(r, c)}[place]
-
-
-def encode(m, bs):
-    """Tokens for a batch of boards, and the token index of each place in each board."""
-    texts = [prompt27(b["board"], b["r"], b["c"]) for b in bs]
-    enc = m.tok(texts, return_tensors="pt", return_offsets_mapping=True)
-    offs = enc.pop("offset_mapping")
-    assert bool(enc["attention_mask"].all()), "board prompts must all have the same length"
-    pos = []
-    for b, o in zip(bs, offs):
-        ends = m._line_ends(o.tolist())
-        r, c = b["r"], b["c"]
-        pos.append([len(o) - 1, ends[r], ends[9 + c], ends[18 + box_of(r, c)]])
-    return {k: v.to(m.device) for k, v in enc.items()}, torch.tensor(pos)
+from ..model.states import encode_boards, states_at
+from ..setup.log import log
+from ..sudoku.boards import facts, target_boards
+from ..sudoku.prompt import PLACES, PLACE_WORDS, line_of
 
 
 # ---------------------------------------------------------------- 1. record
@@ -94,7 +56,7 @@ def record(m, bs, batch=8, cov=False):
     size = torch.zeros(len(PLACES), nL)
     for i in range(0, len(bs), batch):
         chunk = bs[i:i + batch]
-        enc, pos = encode(m, chunk)
+        enc, pos = encode_boards(m, chunk)
         outs = []
         hooks = [layer.register_forward_hook(lambda mod, inp, out: outs.append(out[0] if isinstance(out, tuple) else out))
                  for layer in m.layers]
@@ -127,37 +89,12 @@ def record(m, bs, batch=8, cov=False):
 
 # ---------------------------------------------------------------- 5. check
 
-def states_at(m, bs, need, batch=16):
-    """Each board's state at the (place, layer) pairs in need, and Qwen's answer."""
-    layers = sorted({L for _, L in need})
-    X = {k: [] for k in need}
-    answers = []
-    for i in range(0, len(bs), batch):
-        chunk = bs[i:i + batch]
-        enc, pos = encode(m, chunk)
-        got = {}
-        hooks = [m.layers[L].register_forward_hook(
-            (lambda L: lambda mod, inp, out: got.__setitem__(L, (out[0] if isinstance(out, tuple) else out).detach()))(L))
-            for L in layers]
-        try:
-            with torch.no_grad():
-                lg = m.model(**enc, logits_to_keep=1).logits[:, -1][:, m.digit_ids].float().cpu()
-        finally:
-            for h in hooks:
-                h.remove()
-        rows = torch.arange(len(chunk))
-        for place, L in need:
-            X[place, L].append(got[L][rows, pos[:, PLACES.index(place)].to(got[L].device)].float().cpu())
-        answers += (lg.argmax(1) + 1).tolist()
-    return {k: torch.cat(v) for k, v in X.items()}, answers
-
-
 def answers_with(m, bs, place, L, deltas, batch=16):
     """Qwen's answers when deltas[b] is added to board b's state at (place, layer)."""
     out = []
     for i in range(0, len(bs), batch):
         chunk = bs[i:i + batch]
-        enc, pos = encode(m, chunk)
+        enc, pos = encode_boards(m, chunk)
         adds = [(n, pos[n, PLACES.index(place)].item(), deltas[i + n]) for n in range(len(chunk))]
         out += m.answers_with_adds(enc, {L: adds})
     return out
@@ -280,7 +217,7 @@ def jacobians(m, bs, cands, batch=8):
     for i in range(0, N, batch):
         chunk = bs[i:i + batch]
         B = len(chunk)
-        enc, pos = encode(m, chunk)
+        enc, pos = encode_boards(m, chunk)
         lines = {place: torch.tensor([line_of(place, b["r"], b["c"]) for b in chunk]) for place in PLACES}
         outs = []
         hooks = [layer.register_forward_hook(lambda mod, inp, out: outs.append(out[0] if isinstance(out, tuple) else out))
@@ -360,7 +297,7 @@ def build(m, cfg, log=log):
     jp = path(cfg).replace(".pt", f"_jac{rc['jac_boards']}.pt")
     cands = None
     if not os.path.exists(jp):
-        rec = record(m, boards(rc["boards"], rc["seed"], rc["blanks"]), cov=True)
+        rec = record(m, target_boards(rc["boards"], rc["seed"], rc["blanks"]), cov=True)
         cands = pool(rec, rc)
         del rec
     log(f"step 2: candidate actions; Fisher-weighted Jacobians on {rc['jac_boards']} new boards")
@@ -368,8 +305,8 @@ def build(m, cfg, log=log):
         log(f"  loaded from {jp}")
         J, D, proj, cands = torch.load(jp, weights_only=False)
     else:
-        J, D, proj = jacobians(m, boards(rc["jac_boards"], rc["seed"] + 2, rc["blanks"]), cands)
-        os.makedirs("word_cache", exist_ok=True)
+        J, D, proj = jacobians(m, target_boards(rc["jac_boards"], rc["seed"] + 2, rc["blanks"]), cands)
+        os.makedirs("cache", exist_ok=True)
         torch.save((J, D, proj, cands), jp)
     log("step 3: choosing words by empowerment (mean log det over boards)")
     prims, total = empower(J, D, proj, cands, rc)
@@ -378,7 +315,7 @@ def build(m, cfg, log=log):
         p["passes"] = True
     controls = controls_for(prims, rc["controls_per_place"], rc["seed"])
     log(f"step 4: checking {len(prims)} words and {len(controls)} random directions on {rc['check_boards']} new boards")
-    check_bs = boards(rc["check_boards"], rc["seed"] + 1, rc["blanks"])
+    check_bs = target_boards(rc["check_boards"], rc["seed"] + 1, rc["blanks"])
     base = check(m, prims, check_bs, rc["seed"])
     check(m, controls, check_bs, rc["seed"], label="control")
     best = {}
@@ -399,30 +336,13 @@ def build(m, cfg, log=log):
                     directness=c["directness"], sd=c["sd"]) for c in cands]
     out = dict(primitives=prims, candidates=prims, controls=controls, base=base, controls_best=best,
                logdet=total, pool=summary, config=rc, model=cfg["model_path"])
-    os.makedirs("word_cache", exist_ok=True)
+    os.makedirs("cache", exist_ok=True)
     torch.save(out, path(cfg))
     report(out)
     return out
 
 
 # ---------------------------------------------------------------- 6. describe
-
-def facts(b):
-    """Board facts about the target cell, used only to describe primitives."""
-    g, r, c = b["board"], b["r"], b["c"]
-    units = {"row": sudoku.unit_cells(r, c, "row"), "column": sudoku.unit_cells(r, c, "col"),
-             "box": sudoku.unit_cells(r, c, "box")}
-    f = {}
-    for name, cells in units.items():
-        vals = [g[i][j] for i, j in cells]
-        for d in range(1, 10):
-            f[f"{d} is in the {name}"] = float(d in vals)
-        f[f"empty cells in the {name}"] = float(vals.count(0))
-    f["candidates for the cell"] = float(len(sudoku.all_candidates(g, r, c)))
-    for d in range(1, 10):
-        f[f"the answer is {d}"] = float(b["solution"][r][c] == d)
-    return f
-
 
 def describe(m, prims, bs, top=3):
     need = sorted({(p["place"], p["layer"]) for p in prims})
@@ -450,7 +370,7 @@ def describe(m, prims, bs, top=3):
 def path(cfg):
     name = cfg["model_path"].rstrip("/").split("/")[-1]
     rc = cfg["words"]
-    return f"word_cache/{name}_primitives_{rc['boards']}boards_seed{rc['seed']}_logdet.pt"
+    return f"cache/{name}_primitives_{rc['boards']}boards_seed{rc['seed']}_logdet.pt"
 
 
 def load(m, cfg, log=log):
@@ -499,7 +419,7 @@ def report(out, where="runs/word_stage_logdet"):
 
 
 if __name__ == "__main__":
-    import core
-    cfg, a = core.settings(sys.argv[1:])
-    m = core.load_model(cfg, a)
+    from ..setup.settings import settings, load_model
+    cfg, a = settings(sys.argv[1:])
+    m = load_model(cfg, a)
     load(m, cfg)

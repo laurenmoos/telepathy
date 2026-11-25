@@ -1,13 +1,13 @@
-# Settings. A frozen model fills in sudoku cells while a program (lang.py) reads and writes
-# words inside it; a writer builds the program step by step (write.py).
+# Settings. A frozen model fills in sudoku cells while a program (programs/lang.py) reads and writes
+# words inside it; a writer builds the program step by step (loop.py).
 
 models:
   qwen3-0.6b: Qwen/Qwen3-0.6B
   qwen3-8b:   Qwen/Qwen3-8B
-  coder-7b-4bit: mlx-community/Qwen2.5-Coder-7B-Instruct-4bit   # writer, runs on MLX (write.py MLXWriter)
+  coder-7b-4bit: mlx-community/Qwen2.5-Coder-7B-Instruct-4bit   # writer, runs on MLX (programs/writers.py MLXWriter)
 model: qwen3-0.6b            # the model that is steered and scored
 
-words:                       # answer words (words.py): directions at the answer position, no labels
+words:                       # answer words (words/answer.py): directions at the answer position, no labels
   boards: 1024               # boards Qwen reads to find candidates
   jac_boards: 512            # new boards for each candidate's effect on the answer (9 backward passes each)
   check_boards: 128          # new boards to check each chosen word against random directions
@@ -21,7 +21,7 @@ words:                       # answer words (words.py): directions at the answer
   controls_per_place: 2      # random directions checked the same way
   seed: 777
 
-reads:                       # board words (reads.py): directions at the row, column and box line ends, no labels
+reads:                       # board words (words/board.py): directions at the row, column and box line ends, no labels
   boards: 2048               # boards Qwen reads to find them
   describe_boards: 256       # new boards to describe them
   blanks: [1, 2]
@@ -36,7 +36,7 @@ boards:                      # the task
   seed: 0
   dir: boards
 
-write:                       # the writing loop (write.py)
+write:                       # the writing loop (loop.py)
   writer: null               # null: the steered model writes; or a name under models, or "files"
   sessions: 8                # writing sessions side by side
   steps: 16                  # replies per session

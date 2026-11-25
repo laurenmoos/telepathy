@@ -1,4 +1,4 @@
-"""Boards, board families, prompts and the checker."""
+"""Boards, board families, the checker, and the board sets runs use."""
 import random
 
 DIGITS = set(range(1, 10))
@@ -150,3 +150,44 @@ def board_set(path, n, blanks_range, seed):
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     json.dump(boards, open(path, "w"))
     return boards
+
+
+def make_boards(cfg, log=print):
+    """Practice and held-out boards, saved in boards/ so every run uses the same."""
+    b = cfg["boards"]
+    lo, hi = b["blanks"]
+    practice = board_set(f"{b['dir']}/tune_{b['practice']}_blanks{lo}-{hi}_seed{b['seed']}.json",
+                         b["practice"], (lo, hi), b["seed"])
+    test = board_set(f"{b['dir']}/test_{b['test']}_blanks{lo}-{hi}_seed{b['seed'] + 1}.json",
+                     b["test"], (lo, hi), b["seed"] + 1)
+    log(f"boards: {len(practice)} practice, {len(test)} held-out ({lo}-{hi} empty cells)")
+    return practice, test
+
+
+def target_boards(n, seed, blanks):
+    """Finishable boards with a random empty cell as the target."""
+    rng = random.Random(seed)
+    lo, hi = blanks
+    out = []
+    for _ in range(n):
+        b = make_finishable_board(rng, rng.randint(lo, hi))
+        r, c = rng.choice([(r, c) for r in range(9) for c in range(9) if b["board"][r][c] == 0])
+        out.append(dict(board=b["board"], solution=b["solution"], r=r, c=c))
+    return out
+
+
+def facts(b):
+    """Board facts about the target cell, used only to describe words."""
+    g, r, c = b["board"], b["r"], b["c"]
+    units = {"row": unit_cells(r, c, "row"), "column": unit_cells(r, c, "col"),
+             "box": unit_cells(r, c, "box")}
+    f = {}
+    for name, cells in units.items():
+        vals = [g[i][j] for i, j in cells]
+        for d in range(1, 10):
+            f[f"{d} is in the {name}"] = float(d in vals)
+        f[f"empty cells in the {name}"] = float(vals.count(0))
+    f["candidates for the cell"] = float(len(all_candidates(g, r, c)))
+    for d in range(1, 10):
+        f[f"the answer is {d}"] = float(b["solution"][r][c] == d)
+    return f

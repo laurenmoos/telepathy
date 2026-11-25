@@ -2,8 +2,8 @@
 
 Words. A word is one direction in Qwen's activations at one token position and one layer.
     row_end[i], col_end[i], box_end[i]   at the end of the target cell's row, column and box line
-                                         (reads.py): they show what is in that line
-    answer[i]                            at the answer position (words.py): pushing them changes
+                                         (words/board.py): they show what is in that line
+    answer[i]                            at the answer position (words/answer.py): pushing them changes
                                          Qwen's answer; numbered from the earliest layer
 A word's value on a board: where Qwen's state sits along it, standardized over real boards
 (0 is typical, +1 or -1 is one spread away). Any word can be read and written.

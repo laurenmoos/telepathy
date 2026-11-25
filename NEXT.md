@@ -4,7 +4,7 @@ Read `README.md` first. This file lists what to do next and what to watch for.
 
 ## The question
 
-Can a bigger model, using the writing loop (`write.py`), write a program that helps Qwen3-0.6B? Qwen3-0.6B stays the model that is steered and scored. The writer only proposes actions.
+Can a bigger model, using the writing loop (`telepathy/loop.py`), write a program that helps Qwen3-0.6B? Qwen3-0.6B stays the model that is steered and scored. The writer only proposes actions.
 
 The bar to beat: `programs/row_argmax.txt`, written step by step in the same loop by Claude in 23 actions, gives 10% -> 43% of held-out cells right (6% -> 25% of boards solved). Qwen3-0.6B as the writer reached 5% held-out, worse than no program.
 
@@ -14,12 +14,12 @@ This Mac has about 24 GB of memory.
 
 - **Qwen3-8B in bf16 (16 GB) next to Qwen3-0.6B swaps badly.** A step took 12 minutes, then the run stalled. Don't use it as is.
 - **Qwen3-4B in bf16 (about 8 GB) should fit.** It is in `config.yaml` as `qwen3-4b` but not downloaded yet; the first run downloads it. This is the easiest option.
-- **Qwen3-8B in 4-bit** is downloaded for MLX (`mlx-community/Qwen3-8B-4bit`), but the code can't use it yet. It would need `pip install mlx-lm`, plus a writer class in `write.py` that does constrained decoding with MLX.
+- **Qwen3-8B in 4-bit** is downloaded for MLX (`mlx-community/Qwen3-8B-4bit`), but the code can't use it yet. It would need `pip install mlx-lm`, plus a writer class in `telepathy/programs/writers.py` that does constrained decoding with MLX.
 
 ## Run
 
 ```
-python write.py --set write.writer=qwen3-4b --set write.sessions=2 --set write.steps=8 --set write.actions=8 --out runs/write_4b
+telepathy/run.sh --set write.writer=qwen3-4b --set write.sessions=2 --set write.steps=8 --set write.actions=8 --out runs/write_4b
 ```
 
 - `write.actions=8` lets the writer run a batch of tests in one reply. Claude needed this to learn the answer words quickly.

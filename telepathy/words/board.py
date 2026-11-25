@@ -12,15 +12,17 @@ line break summarizes that line. A board word is one direction in that state, at
                many cells are empty), against a chance level from shuffled boards. The facts only
                describe the words; they never choose them.
 
-    python reads.py
+    ./run.sh board-words
 
-Output: word_cache/<model>_boardwords_....pt (used by core.load_words) and runs/board_words/REPORT.md.
+Output: cache/<model>_boardwords_....pt (used by setup.settings.load_words) and runs/board_words/REPORT.md.
 """
 import os, sys
 import torch
 
-import words
-from words import log
+from ..model.states import states_at
+from ..setup.log import log
+from ..sudoku.boards import facts, target_boards
+from ..sudoku.prompt import PLACE_WORDS, line_of
 
 
 def fastica(X, k, iters=500, seed=0):
@@ -48,10 +50,10 @@ def fastica(X, k, iters=500, seed=0):
 def find(m, bs, rc):
     """The board words: rc["components"] independent components per line end and layer."""
     need = [(p, L) for p in ("ROW", "COL", "BOX") for L in rc["layers"]]
-    X, _ = words.states_at(m, bs, need)
+    X, _ = states_at(m, bs, need)
     out = []
     for place, L in need:
-        lines = torch.tensor([words.line_of(place, b["r"], b["c"]) for b in bs])
+        lines = torch.tensor([line_of(place, b["r"], b["c"]) for b in bs])
         x = X[place, L]
         mean = torch.stack([x[lines == i].mean(0) if (lines == i).any() else x.mean(0) for i in range(9)])
         d = x - mean[lines]
@@ -69,14 +71,14 @@ def find(m, bs, rc):
 def describe(m, ws, bs, top=3, shuffles=50):
     """Each word's strongest board facts, and the chance level (the 95th percentile of the
     largest correlation with the boards shuffled)."""
-    F = [words.facts(b) for b in bs]
+    F = [facts(b) for b in bs]
     names = list(F[0])
     Fm = torch.tensor([[f[k] for k in names] for f in F])
     Fz = (Fm - Fm.mean(0)) / (Fm.std(0) + 1e-6)
-    X, _ = words.states_at(m, bs, sorted({(w["place"], w["layer"]) for w in ws}))
+    X, _ = states_at(m, bs, sorted({(w["place"], w["layer"]) for w in ws}))
     g = torch.Generator().manual_seed(0)
     for w in ws:
-        lines = torch.tensor([words.line_of(w["place"], b["r"], b["c"]) for b in bs])
+        lines = torch.tensor([line_of(w["place"], b["r"], b["c"]) for b in bs])
         v = (X[w["place"], w["layer"]] - w["mean"][lines]) @ w["u"]
         vz = (v - v.mean()) / (v.std() + 1e-6)
         corr = (vz[:, None] * Fz).mean(0)
@@ -84,7 +86,7 @@ def describe(m, ws, bs, top=3, shuffles=50):
                              for _ in range(shuffles))[int(0.95 * shuffles)]
         w["facts"] = [(names[j], round(corr[j].item(), 2)) for j in corr.abs().argsort(descending=True)[:top].tolist()]
         above = [(n, c) for n, c in w["facts"] if abs(c) > w["chance"]]
-        w["description"] = (f"{words.PLACE_WORDS[w['place']]}, layer {w['layer']}. "
+        w["description"] = (f"{PLACE_WORDS[w['place']]}, layer {w['layer']}. "
                             + ("Goes up with: " + "; ".join(f"{n} ({c:+.2f})" for n, c in above) if above
                                else "No board fact above chance") + f" (chance level {w['chance']:.2f}).")
 
@@ -92,18 +94,18 @@ def describe(m, ws, bs, top=3, shuffles=50):
 def path(cfg):
     name = cfg["model_path"].rstrip("/").split("/")[-1]
     rc = cfg["reads"]
-    return (f"word_cache/{name}_boardwords_{rc['boards']}boards_seed{rc['seed']}_ica{rc['components']}"
+    return (f"cache/{name}_boardwords_{rc['boards']}boards_seed{rc['seed']}_ica{rc['components']}"
             f"_L{'-'.join(map(str, rc['layers']))}_b{rc['blanks'][0]}-{rc['blanks'][1]}.pt")
 
 
 def build(m, cfg, log=log):
     rc = cfg["reads"]
     log(f"board words: Qwen reads {rc['boards']} boards")
-    ws = find(m, words.boards(rc["boards"], rc["seed"], rc["blanks"]), rc)
+    ws = find(m, target_boards(rc["boards"], rc["seed"], rc["blanks"]), rc)
     log(f"describing them on {rc['describe_boards']} new boards")
-    describe(m, ws, words.boards(rc["describe_boards"], rc["seed"] + 1, rc["blanks"]))
+    describe(m, ws, target_boards(rc["describe_boards"], rc["seed"] + 1, rc["blanks"]))
     out = dict(reads=ws, config=rc, model=cfg["model_path"])
-    os.makedirs("word_cache", exist_ok=True)
+    os.makedirs("cache", exist_ok=True)
     torch.save(out, path(cfg))
     report(out)
     return out
@@ -129,6 +131,6 @@ def report(out, where="runs/board_words"):
 
 
 if __name__ == "__main__":
-    import core
-    cfg, a = core.settings(sys.argv[1:])
-    load(core.load_model(cfg, a), cfg)
+    from ..setup.settings import settings, load_model
+    cfg, a = settings(sys.argv[1:])
+    load(load_model(cfg, a), cfg)
