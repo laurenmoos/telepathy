@@ -2,9 +2,8 @@
 # words inside it; a writer builds the program step by step (loop.py).
 
 models:
-  qwen3-0.6b: Qwen/Qwen3-0.6B
-  qwen3-8b:   Qwen/Qwen3-8B
-  coder-7b-4bit: mlx-community/Qwen2.5-Coder-7B-Instruct-4bit   # writer, runs on MLX (programs/writers.py MLXWriter)
+  qwen3-0.6b:    Qwen/Qwen3-0.6B                # steered (for now)
+  qwen3-8b-4bit: mlx-community/Qwen3-8B-4bit    # writer, runs on MLX
 model: qwen3-0.6b            # the model that is steered and scored
 
 words:                       # answer words (words/answer.py): directions at the answer position, no labels
@@ -45,4 +44,12 @@ write:                       # the writing loop (loop.py)
   show_words: 999            # board words shown to each session (a random subset if fewer than all)
   temperature: 1.0
   repetition_penalty: 1.15
+  seed: 0
+
+agent:                       # the tool-calling writer (agent.py)
+  writer: qwen3-8b-4bit
+  calls: 40                  # the writer's replies, each with tool calls
+  cells: 96                  # practice cells each run is scored on
+  temperature: 0.6
+  max_tokens: 6000           # per reply, thinking included
   seed: 0

@@ -48,7 +48,8 @@ It also has `clear(W)`, sums like `0.5 * row_end[3] - col_end[1]`, and `if EXPR 
 telepathy/run.sh answer-words                      # answer words (cached in cache/)
 telepathy/run.sh board-words                       # board words (cached in cache/)
 telepathy/run.sh --out runs/write                  # the writing loop; the best program is checked at the end
-telepathy/run.sh --set write.writer=coder-7b-4bit --set write.sessions=2 --set write.actions=8
+telepathy/run.sh --set write.writer=qwen3-8b-4bit --set write.sessions=2 --set write.actions=8
+telepathy/run.sh agent --out runs/agent           # the writer calls tools (run, submit); checked at the end
 telepathy/run.sh --set write.writer=files          # write the replies yourself
 telepathy/run.sh check programs/row_argmax.txt     # check a program
 ```
@@ -65,6 +66,7 @@ The code is one package, `telepathy/`. The outer loop is `loop.py`; everything e
 |---|---|
 | `telepathy/run.sh` | Runs the loop, a check, or a word stage |
 | `telepathy/loop.py` | The writing loop: sessions side by side, then the check |
+| `telepathy/agent.py` | The tool-calling writer: it calls `run` (raw rows per cell, with traces) and `submit`, then the check |
 | `telepathy/config.yaml` | Settings |
 | `telepathy/setup/` | Settings (`settings.py`), the log (`log.py`), loading the model and its words |
 | `telepathy/model/` | The frozen model: loading it (`load.py`), its state at word places (`states.py`), replies (`generate.py`) |

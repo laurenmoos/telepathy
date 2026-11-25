@@ -1,6 +1,6 @@
 """The outer loop: writing sessions side by side, each building a program step by step.
 
-    ./run.sh [--set write.sessions=2] [--set write.writer=coder-7b-4bit] [--out runs/write]
+    ./run.sh [--set write.sessions=2] [--set write.writer=qwen3-8b-4bit] [--out runs/write]
 
 At the end, the best program from all sessions is checked on the practice and held-out boards
 (programs/check.py). What one step does is in programs/write.py; who writes is in
