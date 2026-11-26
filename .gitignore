@@ -11,3 +11,4 @@ runs/
 word_cache/
 cache/
 .venv
+lean/
