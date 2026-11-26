@@ -31,11 +31,17 @@ prompts:                     # every text the model sees; {name} fields are fill
   base: |-
     Write a short Python program. It runs inside a language model (you) while the model reads a
     prompt and gives the next token. The goal is for the model to give the right answer more
-    often. Here is one prompt the model reads; the right answer is the digit after the "=":
+    often.
+
+    Each prompt is a sudoku board: its 9 rows, then its 9 columns, then its 9 boxes, one line of
+    9 digits each (0 is an empty cell), then the cell to fill, like r4c7= (row 4, column 7). The
+    model's answer is the next token after the "=": the digit for that cell. The right digit is
+    not in the prompt; the model has to work it out from the board. Here is one prompt; the board
+    and the cell are different in every prompt:
 
     {example}
 
-    Every prompt has this form. Your program runs once per prompt, and gets:
+    Your program runs once per prompt, and gets:
       prompt          the prompt text
       tokens          a list: tokens[pos] is the text of the token at position pos (0 to last)
       last            the position of the last token ({last} here); the model answers there
