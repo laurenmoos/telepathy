@@ -12,7 +12,9 @@ from .baseline import PROMPT, tactics
 from .judge import problems, check
 from ..setup.log import log
 
-REPAIR = "Lean says:\n{err}\n\nFix the proof. Reply with only the tactics, in one ```lean block."
+REPAIR = "Lean says:\n{err}\n\n{hint}Fix the proof. Reply with only the tactics, in one ```lean block."
+UNKNOWN = ("A name Lean says is unknown does not exist in Mathlib. Do not guess another name: write exact? at "
+           "that step, and Lean searches for a lemma that closes the goal.\n")
 
 
 def attempt(live, statement, rounds, think_tokens, max_tokens):
@@ -27,8 +29,9 @@ def attempt(live, statement, rounds, think_tokens, max_tokens):
         out.append(dict(proof=proof, passed=ok, lean=msg[:2000]))
         if ok:
             break
+        hint = UNKNOWN if "unknown" in msg.lower() and ("identifier" in msg or "constant" in msg) else ""
         chat += [{"role": "assistant", "content": answer.strip()},
-                 {"role": "user", "content": REPAIR.format(err="\n".join(msg.splitlines()[:12]))}]
+                 {"role": "user", "content": REPAIR.format(err="\n".join(msg.splitlines()[:12]), hint=hint)}]
     return out
 
 
@@ -39,7 +42,7 @@ def main(argv=None):
     ap.add_argument("--seed", type=int, default=2)
     ap.add_argument("--rounds", type=int, default=4)
     ap.add_argument("--think_tokens", type=int, default=1000)
-    ap.add_argument("--max_tokens", type=int, default=512)
+    ap.add_argument("--max_tokens", type=int, default=768)
     ap.add_argument("--model", default="mlx-community/Qwen3-8B-4bit")
     ap.add_argument("--out", default="runs/eval")
     a = ap.parse_args(argv)
