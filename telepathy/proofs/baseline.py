@@ -3,9 +3,9 @@
 For each problem, up to `tries` attempts (stopping at the first that Lean accepts). Results are
 saved after every problem to <out>/results.json, and a rerun skips problems already done.
 
-    python -m telepathy.proofs.baseline [--split Valid] [--tries 4] [--out runs/baseline]
+    python -m telepathy.proofs.baseline [--split Valid] [--tries 4] [--sample 12] [--out runs/baseline]
 """
-import argparse, json, os, re, time
+import argparse, json, os, random, re, time
 
 from .judge import problems, check
 from ..setup.log import log
@@ -43,6 +43,8 @@ def main(argv=None):
     ap.add_argument("--tries", type=int, default=4)
     ap.add_argument("--model", default="mlx-community/Qwen3-8B-4bit")
     ap.add_argument("--max_tokens", type=int, default=512)
+    ap.add_argument("--sample", type=int, default=0, help="only this many random problems (0: all)")
+    ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default="runs/baseline")
     a = ap.parse_args(argv)
     os.makedirs(a.out, exist_ok=True)
@@ -51,6 +53,9 @@ def main(argv=None):
     from ..model.live import Live
     live = Live(a.model)
     probs = problems(a.split)
+    if a.sample:
+        keep = random.Random(a.seed).sample(sorted(probs), a.sample)
+        probs = {n: probs[n] for n in sorted(keep)}
     t0 = time.time()
     for i, (name, statement) in enumerate(probs.items(), 1):
         if name in results:
