@@ -17,8 +17,8 @@ The loop (`telepathy/loop.py`) is online: it takes one problem at a time, and no
 1. **Match.** Compare each candidate with the cache. A candidate close to a cached read instruction adds to that instruction's count. Any other candidate goes into the cache as new, with a count of 1.
 2. **Write.** The model writes an `llm_program` for this problem. It sees the problem's tokens with their positions, and what each shown read instruction does on them.
 3. **Trace.** Run the `llm_program` on the prompt pass only, with no generation, and show the model a trace. Steps 2 and 3 repeat `write.rounds` times.
-4. **Check.** Run the task's attempt with no program and with the program. The judge says passed or failed.
-5. **Cache.** Keep the `llm_program` if it passed where the plain attempt failed. Keep read instructions that come back on later problems or that a kept program used. Discard the others.
+4. **Check.** Run the task's attempt with no program and with the program. The judge says passed or failed. After a failed check, the model edits the program in the same conversation, and the edited program is traced and checked again, up to `check.retries` times (3). The best program is retained: a passed attempt beats a failed one, and fewer rounds beat more (`score` in `telepathy/tasks/__init__.py`).
+5. **Cache.** Keep the best `llm_program` if it passed where the plain attempt failed. Keep read instructions that come back on later problems or that a kept program used. Discard the others.
 6. Go to the next problem, at step 0.
 
 ## Step 0: read

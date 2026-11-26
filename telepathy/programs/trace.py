@@ -4,13 +4,13 @@ The trace reads like a debugger's: each line of the program that ran, in order, 
 or wrote; then how the writes moved each read instruction's values, against the plain states.
 
 
-    trace(live, code, view, first, last, cache, names, plain, plain_lp)  (text, program events)
+    trace(live, code, view, first, last, cache, names, plain)  (text, program events)
 """
 from ..instructions.read import gather
 from .runtime import Program
 
 
-def trace(live, code, view, first, last, cache, names, plain, plain_lp, show_lines=30):
+def trace(live, code, view, first, last, cache, names, plain, show_lines=30):
     positions = list(range(first, last + 1))
     table = cache.table(cache.ranked())
     prog = Program(code, view, first, last, table, len(live.layers))

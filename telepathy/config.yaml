@@ -27,6 +27,9 @@ write:                       # steps 2 and 3 (programs/write.py, programs/trace.
   temperature: 0.7
   think: false
 
+check:                       # step 4 (loop.py)
+  retries: 3                 # after a failed check, edit the program and check again; the best is kept
+
 attempt:                     # step 4 (the task's attempt)
   rounds: 4                  # write a proof, repair from the judge's errors
   think_tokens: 1000
@@ -78,4 +81,11 @@ prompts:                     # the loop's texts; none of them is about the task.
     {trace}
 
     Write the program again, changed as the trace suggests. Reply with only the code, in one
+    ```python block.
+  retry: |-
+    You then attempted the task with your program, and the attempt {result}. Here is the program's
+    trace again:
+    {trace}
+
+    Edit the program so that your next attempt succeeds. Reply with only the code, in one
     ```python block.

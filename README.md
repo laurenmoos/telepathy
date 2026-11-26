@@ -18,8 +18,8 @@ The full design is in `docs/lean_loop.md`.
 1. **Match.** A candidate close to a cached read instruction adds to that instruction's count. Any other candidate enters the cache as new.
 2. **Write.** The model writes an `llm_program` from two instructions, `read` and `write`.
 3. **Trace.** The program runs on the prompt pass only, with no generation. The model sees each line that ran, what it read or wrote, and how the read values moved against the plain states. Steps 2 and 3 repeat `write.rounds` times.
-4. **Check.** The task's attempt runs with no program and with the program. A program is tried only if it runs: it compiles, raises no error, and makes at least one write.
-5. **Cache.** The program is kept if it passed where the plain attempt failed. Read instructions are kept if they came back on later problems or a kept program used them. The others are discarded.
+4. **Check.** The task's attempt runs with no program and with the program. A program is tried only if it runs: it compiles, raises no error, and makes at least one write. After a failed check, the model edits the program, and the edit is traced and checked again, up to `check.retries` times. The best program is retained.
+5. **Cache.** The best program is kept if it passed where the plain attempt failed. Read instructions are kept if they came back on later problems or a kept program used them. The others are discarded.
 
 ## The instruction set
 
