@@ -22,7 +22,12 @@ def tactics(reply):
     """The proof from a reply: the last ```lean block, and only what follows ":= by" if the
     reply repeats the statement."""
     blocks = re.findall(r"```(?:lean4?)?\n(.*?)```", reply, re.S)
-    text = blocks[-1] if blocks else reply
+    if blocks:
+        text = blocks[-1]
+    elif "```" in reply:                       # a block cut off at the token limit
+        text = reply.rsplit("```", 1)[1].split("\n", 1)[-1]
+    else:
+        text = reply
     if ":= by" in text:
         text = text.split(":= by", 1)[1]
     lines = [l for l in text.strip("\n").splitlines() if l.strip()]
@@ -52,7 +57,8 @@ def main(argv=None):
             continue
         attempts = []
         for k in range(a.tries):
-            reply = live.generate(PROMPT.format(statement=statement), a.max_tokens, 0.7, False).split("</think>")[-1]
+            reply = live.generate(PROMPT.format(statement=statement), a.max_tokens, 0.7, False,
+                                  repetition_penalty=1.1).split("</think>")[-1]
             proof = tactics(reply)
             ok, msg = check(statement, proof) if proof else (False, "no proof in the reply")
             attempts.append(dict(proof=proof, passed=ok, lean=msg[:2000]))
