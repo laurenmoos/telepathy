@@ -19,8 +19,8 @@ after ":= by", in one ```lean block.
 
 
 def tactics(reply):
-    """The proof from a reply: the last ```lean block, and only what follows ":= by" if the
-    reply repeats the statement."""
+    """The proof from a reply: the last ```lean block, and only what follows the statement's ":= by"
+    if the reply repeats the statement (a theorem, lemma or example line)."""
     blocks = re.findall(r"```(?:lean4?)?\n(.*?)```", reply, re.S)
     if blocks:
         text = blocks[-1]
@@ -28,8 +28,8 @@ def tactics(reply):
         text = reply.rsplit("```", 1)[1].split("\n", 1)[-1]
     else:
         text = reply
-    if ":= by" in text:
-        text = text.split(":= by", 1)[1]
+    if re.search(r"^\s*(theorem|lemma|example)\b", text, re.M) and ":= by" in text:
+        text = text.split(":= by", 1)[1]          # the reply repeated the statement
     lines = [l for l in text.strip("\n").splitlines() if l.strip()]
     if not lines:
         return ""
