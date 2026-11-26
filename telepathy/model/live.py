@@ -9,8 +9,8 @@ code, and calls two tools that need nothing learned, only the model's own output
     push(pos, layer, token, amount)  add to the state at `pos` after `layer` the output direction of
                                      `token`, scaled to `amount` times the size of the state there
 
-It also gets: prompt (the text), tokens (the text of each token), token_at(i) (the token position
-holding character i of the prompt), last (the last token position) and layers (how many layers).
+It also gets: prompt (the text), tokens (the text of each token), position_of(i) (the token
+position holding character i of the prompt), last (the last token position) and layers.
 
 The forward pass runs layer by layer. After each layer, the pushes for that layer are applied and
 the peeks for that layer are answered, until every program waits for a later layer or is done.
@@ -245,14 +245,14 @@ class _Worker:
         self.note(line, f"push({pos}, {layer}, {token!r}, {amount:.2f})")
         self.events.append((line, "push", float(amount)))
 
-    def token_at(self, i):
+    def position_of(self, i):
         for t, (s, e) in enumerate(self.offsets):
             if s <= i < e:
                 return t
         raise ValueError(f"character {i!r} is not in the prompt")
 
     def _main(self):
-        env = dict(__builtins__=SAFE, prompt=self.prompt, tokens=self.tokens, token_at=self.token_at,
+        env = dict(__builtins__=SAFE, prompt=self.prompt, tokens=self.tokens, position_of=self.position_of,
                    last=self.T - 1, layers=len(self.live.layers), peek=self.peek, push=self.push)
         try:
             exec(compile(self.code, "<program>", "exec"), env)

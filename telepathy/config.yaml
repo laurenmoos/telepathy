@@ -37,9 +37,9 @@ prompts:                     # every text the model sees; {name} fields are fill
 
     Every prompt has this form. Your program runs once per prompt, and gets:
       prompt          the prompt text
-      tokens          the text of each token; positions are 0 to last
+      tokens          a list: tokens[pos] is the text of the token at position pos (0 to last)
       last            the position of the last token ({last} here); the model answers there
-      token_at(i)     the token position holding character i of prompt
+      position_of(i)  the token position (a number) holding character i of prompt
       layers          the number of layers ({layers}); they are 0 to {layers} - 1
       peek(pos, layer, token)
           how strongly the model leans toward token (a string, like "5") at position pos after
@@ -52,10 +52,11 @@ prompts:                     # every text the model sees; {name} fields are fill
     Write top-level code that runs as it is: do not put it in a function. Use ordinary Python:
     variables, if, for, string methods, lists. No imports.
 
+    A few peeks and pushes at chosen layers usually do more than many: pushes add up.
+
     Example:
-        eq = token_at(prompt.rindex("="))
-        first_line_end = token_at(prompt.index("\n") - 1)
-        if peek(first_line_end, 10, "5") > -8.0:
+        first_line_end = position_of(prompt.index("\n") - 1)
+        if tokens[first_line_end] == "5" and peek(first_line_end, 10, "5") > -8.0:
             push(last, 30, "5", 0.3)
   fresh: |-
     Write a program. Reply with only the code, in one ```python block.
