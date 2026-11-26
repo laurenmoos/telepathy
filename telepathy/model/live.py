@@ -40,15 +40,25 @@ class Live:
 
     # ------------------------------------------------------------ writing
 
-    def generate(self, prompt, max_tokens=700, temperature=0.7, think=False, repetition_penalty=None):
+    def generate(self, prompt, max_tokens=700, temperature=0.7, think=False, repetition_penalty=None,
+                 think_tokens=None, messages=None):
+        """A reply to prompt (or to a list of chat messages). With think and think_tokens, the
+        thinking is closed after think_tokens tokens and the reply follows, up to max_tokens."""
         from mlx_lm import generate
         from mlx_lm.sample_utils import make_logits_processors, make_sampler
-        ids = self.wrap.apply_chat_template([{"role": "user", "content": prompt}], add_generation_prompt=True,
-                                            enable_thinking=think)
-        return generate(self.model, self.wrap, ids, max_tokens=max_tokens,
-                        sampler=make_sampler(temp=temperature, top_p=0.95, top_k=20),
-                        logits_processors=make_logits_processors(repetition_penalty=repetition_penalty)
-                        if repetition_penalty else None)
+        chat = messages or [{"role": "user", "content": prompt}]
+        ids = self.wrap.apply_chat_template(chat, add_generation_prompt=True, enable_thinking=think)
+        kw = dict(sampler=make_sampler(temp=temperature, top_p=0.95, top_k=20),
+                  logits_processors=make_logits_processors(repetition_penalty=repetition_penalty)
+                  if repetition_penalty else None)
+        if not (think and think_tokens):
+            return generate(self.model, self.wrap, ids, max_tokens=max_tokens, **kw)
+        thought = generate(self.model, self.wrap, ids, max_tokens=think_tokens, **kw)
+        if "</think>" in thought:
+            thought = thought.split("</think>")[0]
+        thought += "\n</think>\n\n"
+        ids = list(ids) + self.tok.encode(thought, add_special_tokens=False)
+        return thought + generate(self.model, self.wrap, ids, max_tokens=max_tokens, **kw)
 
     # ------------------------------------------------------------ the model's own read and write
 

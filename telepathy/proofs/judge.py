@@ -2,8 +2,9 @@
 
     problems(split)        {name: statement} for split "Valid" or "Test"; each statement ends
                            with ":= by", and a proof is the tactics that follow
-    check(name, proof)     (passed, Lean's messages): Lean checks the statement with the proof,
+    check(statement, proof)  (passed, Lean's messages): Lean checks the statement with the proof,
                            and it passes only with no error and no sorry
+    normalize(proof)       old Mathlib spellings rewritten to current ones
 """
 import os, re, subprocess, tempfile
 
@@ -20,8 +21,15 @@ def problems(split="Valid"):
     return out
 
 
+def normalize(proof):
+    """Old Mathlib spellings that current Mathlib rejects, rewritten (formatting, not reasoning):
+    sums and products over a set, "∑ x in s, f x", are now "∑ x ∈ s, f x"."""
+    return re.sub(r"([∑∏]\s*[^,∈]*?)\s+in\s+", r"\1 ∈ ", proof)
+
+
 def check(statement, proof, timeout=120):
-    """Is `proof` (tactics) a proof of `statement` (ending ":= by")?"""
+    """Is `proof` (tactics) a proof of `statement` (ending ":= by")? Old spellings are fixed first."""
+    proof = normalize(proof)
     body = "\n".join("  " + line for line in proof.strip("\n").splitlines())
     with tempfile.NamedTemporaryFile("w", suffix=".lean", dir=ROOT, delete=False) as f:
         f.write(statement + "\n" + body + "\n")

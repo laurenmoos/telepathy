@@ -10,8 +10,21 @@ import argparse, json, os, random, re, time
 from .judge import problems, check
 from ..setup.log import log
 
-PROMPT = """Complete this Lean 4 proof (Mathlib is imported). Reply with only the tactics that come
-after ":= by", in one ```lean block.
+PROMPT = """Complete this Lean 4 proof (Mathlib is imported). Think about the math first. Then reply
+with only the tactics that come after ":= by", in one ```lean block.
+
+Write Lean 4, not Lean 3:
+- one tactic per line; no commas between tactics
+- obtain ⟨a, b⟩ := h  (not: cases h with a b)
+- fun x => ...  (not: λ x, ...)
+- have h : P := by tactic
+- sums are written ∑ k ∈ Finset.range n, f k  (not: ∑ k in ...)
+Use the hypothesis names given in the statement (like h₀, h₁).
+Prefer tactics that do the algebra themselves: norm_num, linarith, nlinarith [sq_nonneg (x - y)],
+omega, ring_nf, field_simp, positivity, decide, simp. Use rw only with an equation whose left side
+appears exactly in the goal.
+If you need a Mathlib lemma but are not sure of its exact name, write exact? at that step:
+Lean searches for a lemma that closes the goal.
 
 ```lean
 {statement}
