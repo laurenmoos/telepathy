@@ -2,9 +2,8 @@
 # words inside it; a writer builds the program step by step (loop.py).
 
 models:
-  qwen3-0.6b:    Qwen/Qwen3-0.6B                # steered (for now)
-  qwen3-8b-4bit: mlx-community/Qwen3-8B-4bit    # writer, runs on MLX
-model: qwen3-0.6b            # the model that is steered and scored
+  qwen3-8b-4bit: mlx-community/Qwen3-8B-4bit    # writes programs and is steered by them (MLX)
+model: qwen3-8b-4bit         # the model that programs itself
 
 words:                       # answer words (words/answer.py): directions at the answer position, no labels
   boards: 1024               # boards Qwen reads to find candidates
