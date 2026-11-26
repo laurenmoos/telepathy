@@ -89,3 +89,20 @@ prompts:                     # the loop's texts; none of them is about the task.
 
     Edit the program so that your next attempt succeeds. Reply with only the code, in one
     ```python block.
+
+control:                     # the step 0 control experiment (eval/control.py)
+  problems: 3                # fixed Valid problems (task.seed)
+  layers: [0, 6, 12, 18, 24, 30]   # write layers; a write after the last layer changes only one token
+  tokens: 8                  # lens tokens per difference and layer
+  vocab_reply: 32            # step 0 samples its own reply (another seed) of this many tokens; 0: no vocabulary
+  vocab_top: 20              # its top tokens per position form the vocabulary the lens tokens come from
+  push: 0.05                 # first guess at the push size, times the norm of the state at the last token
+  target: 0.1                # the push size at each layer is set so that a random direction gives this |e|^2
+  calibrate: 4               # random directions per layer for setting the push size
+  saturated: 4.0             # |e|^2 above this: the push replaces the reply (the maximum is 8)
+  reply: 64                  # plain reply tokens the effects are read over
+  top: 64                    # plain top tokens per reply position (plus one bucket for the rest)
+  noise: 1.0                 # the noise in the empowerment score
+  temperature: 0.6
+  pool: 16                   # random directions per layer in the fixed metric (the floor draws from them)
+  show: 12                   # candidates shown per problem
