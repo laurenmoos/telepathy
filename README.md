@@ -6,43 +6,52 @@
   <sub>J. J. Grandville, <i>La lune peinte par elle-même</i>, from <i>Un autre monde</i> (1844)</sub>
 </p>
 
-A small frozen language model (Qwen3-0.6B) fills in sudoku cells. A short program runs inside the model while it does, reading some of its internal numbers and changing others. The goal is for a model to write that program itself, by trying things and seeing what happens.
+A language model (Qwen3-8B, 4-bit, on MLX) writes a short program for itself. The program runs inside the model while it reads a task prompt: it reads directions in the model's internal state and moves the state along them. Then the model attempts the task, and a judge says whether it passed. The first task is Lean proofs (miniF2F), with Lean as the judge.
 
-## How it works
+The full design is in `docs/lean_loop.md`.
 
-**1. The model reads the board.** The prompt lists the board's 9 rows, 9 columns and 9 boxes, one line each (0 means empty), and then names the target cell, like `r4c7=`. The model's next character is its answer.
+## The loop
 
-**2. Words: numbers inside the model that a program can use.** A word is one direction in the model's internal state, at one place in the prompt and one layer. Its value on a board says where the model's state sits along that direction (0 is typical, +1 or -1 is unusual). A program can read a word's value or set it. All words are found with no labels.
+`telepathy/loop.py` takes one problem at a time. Nothing is computed over all problems in advance.
 
-- **Board words** (`words/board.py`) sit at the end of the target cell's row, column and box lines, where the model has just read that line. They come from independent component analysis of the model's state there, 32 per line. Many of them go up when a particular digit is missing from the line.
-- **Answer words** (`words/answer.py`) sit where the model gives its answer. They are the 8 directions that give the most varied control over the answer across many boards. Setting one pushes the answer toward certain digits.
+0. **Read.** One prompt pass over the plain task prompt, with no program. The states at this problem's tokens give noisy candidate read instructions: at each layer, the directions along which the tokens vary most.
+1. **Match.** A candidate close to a cached read instruction adds to that instruction's count. Any other candidate enters the cache as new.
+2. **Write.** The model writes an `llm_program` from two instructions, `read` and `write`.
+3. **Trace.** The program runs on the prompt pass only, with no generation. The model sees each line that ran, what it read or wrote, and how the read values moved against the plain states. Steps 2 and 3 repeat `write.rounds` times.
+4. **Check.** The task's attempt runs with no program and with the program. A program is tried only if it runs: it compiles, raises no error, and makes at least one write.
+5. **Cache.** The program is kept if it passed where the plain attempt failed. Read instructions are kept if they came back on later problems or a kept program used them. The others are discarded.
 
-**3. The program language** (`programs/lang.py`) is a small Python subset:
+## The instruction set
 
-```python
-best = argmax(row_end[25], row_end[15], row_end[6])   # which word is largest on this board
-if best == 0:
-    set(answer[5], 3.00)                              # push this answer word
-elif best == 1:
-    set(answer[7], 3.00)
+- **Read instruction.** One direction in the residual stream at one layer. `read(name, pos)` gives how far the state at token `pos` sits along it, in units of its spread over the problems seen so far: 0 is typical, +2 or -2 is unusual.
+- **Write instruction.** `write(name, pos, amount)` moves the state at `pos`, at the instruction's layer, so that the read value there goes up by `amount`. The write happens in the prompt pass, so the KV cache carries it into every token of the reply.
+
+Reads and writes must go in layer order, because the program runs with the pass.
+
+## Layout
+
+```
+telepathy/
+  run.sh, loop.py, config.yaml   the entry point, the loop, the settings (and every prompt the loop uses)
+  model/live.py                  the model: prompt pass with a hook after each layer, generation
+  instructions/read.py           step 0: plain states and candidate read instructions
+  instructions/cache.py          steps 1 and 5: the cache of read instructions
+  programs/runtime.py            the llm_program: read and write inside the prompt pass
+  programs/trace.py              step 3: the trace
+  programs/write.py              steps 2 and 3: write, trace, write again
+  tasks/attempt.py               the task's attempt alone, with no program
+  tasks/lean/task.py, judge.py   the Lean task: TASK_PROMPT, the attempt, and Lean as the judge
 ```
 
-It also has `clear(W)`, sums like `0.5 * row_end[3] - col_end[1]`, and `if EXPR > X:` with an optional `else:`.
-
-**4. Running a program** (`programs/run.py`). The program runs inside one forward pass. Each statement acts at the layer of its words, and the pass only moves forward, so a statement can read only words at or before the layer it writes.
-
-**5. Writing a program** (`loop.py`, `programs/write.py`). A writer builds the program one step at a time. Each step is an action: add, replace or delete a statement, or test statements or a word. Each action runs at once on 96 practice cells, and the writer sees what changed: cells right, answers changed, cells fixed and broken. A change that lowers the number of cells right is undone. The writer can be the steered model itself, another model, or a person (or assistant) writing replies into files.
-
-**6. Checking a program** (`eval/check.py`). The program fills every empty cell of the practice boards and of held-out boards, and is compared with no program.
-
-## What we know so far
-
-- The model records which digits are in each row, column and box at the end of each line, but that information never reaches the place where it answers.
-- A program that reads the board words and pushes the matching answer word closes that gap: written step by step in the loop (`programs/row_argmax.txt`), it takes the model from 10% to 43% of held-out cells right (6% to 25% of boards solved) on boards with 1-2 empty cells.
-- The model can only be pushed toward some digits: 1, 2, 4, 5, 6 and 7, not 3 or 8, and only weakly toward 9.
-- Qwen3-0.6B cannot yet write such a program itself. Qwen3-8B chose sensible board words in a short test, but the two models together do not fit in this Mac's memory at full precision.
+Only `tasks/` knows about the task. A new task is a module with `problems`, `prompt` and `attempt`.
 
 ## Run
 
+From the repo root (Lean and miniF2F must be built in `lean/miniF2F`):
 
+```
+telepathy/run.sh --set task.sample=20 --out runs/loop      # the loop
+telepathy/run.sh attempt --set task.sample=5               # the attempt alone, with no program
+```
 
+Settings are in `telepathy/config.yaml`; any of them can be changed with `--set key.sub=value`. Each run saves `results.json` (per problem: the programs, their traces, both attempts) and the cache (`cache.json`, `cache.npz`) in `--out`, and a rerun goes on from there.

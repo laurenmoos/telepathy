@@ -1,7 +1,7 @@
 """Settings and the model.
 
     settings(argv)     config.yaml, with --set key.sub=value overrides
-    load_live(cfg)     the model (cfg["model"]): it writes programs and runs them on itself
+    load_live(cfg)     the model (cfg["model"]): it writes llm_programs and runs them on itself
 """
 import argparse, os
 import yaml
@@ -15,7 +15,7 @@ def settings(argv=None, extra=None):
     """Read config.yaml. extra: a function that adds more arguments to the parser."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=CONFIG)
-    ap.add_argument("--set", action="append", default=[], help="override a setting, e.g. boards.blanks=[2,5]")
+    ap.add_argument("--set", action="append", default=[], help="override a setting, e.g. task.sample=10")
     if extra:
         extra(ap)
     a = ap.parse_args(argv)
@@ -33,6 +33,6 @@ def settings(argv=None, extra=None):
 
 def load_live(cfg):
     from ..model.live import Live
-    live = Live(cfg["model_path"], keep=cfg["live"]["keep"])
+    live = Live(cfg["model_path"])
     log(f"model {cfg['model_path']}: {len(live.layers)} layers")
     return live

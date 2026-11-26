@@ -8,7 +8,7 @@
 """
 import os, re, subprocess, tempfile
 
-ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "lean", "miniF2F")
+ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "lean", "miniF2F")
 
 
 def problems(split="Valid"):

@@ -1,9 +1,9 @@
-"""One model writes small programs that run inside its own forward pass while it fills in sudoku cells.
+"""A model writes a program that runs inside its own prompt pass, then attempts a task with it.
 
-    loop.py     the outer loop: the model writes, runs, verifies and improves a program for itself
-    check.py    check a program file on the practice and held-out boards
-    model/      the model, and running programs inside its forward pass with peek and push (live.py)
-    eval/       the practice cells with feedback, playing whole boards, the check on held-out boards
-    setup/      settings and the log
-    sudoku/     boards, the board prompt, the board sets
+    loop.py         the loop: read, match, write, trace, check, cache (one problem at a time)
+    model/          the model: the prompt pass with a hook after each layer, and generation
+    instructions/   read instructions: candidates from the problem at hand, and the cache
+    programs/       the llm_program: running it, tracing it, the model writing it
+    tasks/          the tasks; only these know about the task (tasks/lean: Lean on miniF2F)
+    setup/          settings and the log
 """

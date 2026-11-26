@@ -1,85 +1,81 @@
-# Settings. One model writes small programs that run inside its own forward pass while it fills
-# in sudoku cells (loop.py). Programs use peek and push (model/live.py).
+# Settings for the loop (loop.py). One model reads a task prompt, writes an llm_program that runs
+# inside its own prompt pass, and attempts the task with it.
 
 models:
-  qwen3-8b-4bit: mlx-community/Qwen3-8B-4bit    # writes programs and is steered by them (MLX)
+  qwen3-8b-4bit: mlx-community/Qwen3-8B-4bit
 model: qwen3-8b-4bit
 
-live:                        # running programs (model/live.py)
-  keep: [0, 6, 12, 18, 24, 30, 35]   # layers whose plain states are saved for the practice cells (speed)
+task:                        # the task (tasks/<name>/task.py)
+  name: lean
+  split: Valid
+  sample: 20                 # problems, taken one at a time (0: all)
+  seed: 2
 
-boards:                      # the task
-  practice: 96               # practice boards; the practice cells come from these
-  test: 64                   # held out until the check
-  blanks: [1, 2]             # empty cells per board
-  seed: 0
-  dir: boards
+read:                        # step 0 (instructions/read.py)
+  layers: [0, 6, 12, 18, 24, 30, 35]
+  candidates: 8              # candidate read instructions per layer, per problem
 
-loop:                        # the coding loop (loop.py)
-  steps: 20                  # search or improve steps in all
-  samples: 3                 # programs sampled per improve step
-  restart_after: 3           # improve steps with no gain before starting from a fresh program
-  cells: 32                  # practice cells each program is run on
+cache:                       # steps 1 and 5 (instructions/cache.py)
+  match: 0.5                 # |cosine| at which a candidate is the same as a cached instruction
+  persist: 3                 # an instruction that came back this many times is kept for good
+  patience: 5                # problems an instruction may go without coming back before it is discarded
+
+write:                       # steps 2 and 3 (programs/write.py, programs/trace.py)
+  rounds: 2                  # write, trace, write again
+  show: 12                   # read instructions shown to the model
+  max_tokens: 700
   temperature: 0.7
-  think: false               # Qwen3 thinking before each program
-  max_tokens: 700            # per program
-  examples: 1                # fixed and broken cells shown with their traces, of each
-  show_failed: 3             # recent attempts that were not better, shown when improving
-  seed: 0
+  think: false
 
-prompts:                     # every text the model sees; {name} fields are filled in by the code
-  base: |-
-    Write a short Python program. It runs inside a language model (you) while the model reads a
-    prompt and gives the next token. The goal is for the model to give the right answer more
-    often.
+attempt:                     # step 4 (the task's attempt)
+  rounds: 4                  # write a proof, repair from the judge's errors
+  think_tokens: 1000
+  max_tokens: 768
+  temperature: 0.6
+  repetition_penalty: 1.05
 
-    Each prompt is a sudoku board: its 9 rows, then its 9 columns, then its 9 boxes, one line of
-    9 digits each (0 is an empty cell), then the cell to fill, like r4c7= (row 4, column 7). The
-    model's answer is the next token after the "=": the digit for that cell. The right digit is
-    not in the prompt; the model has to work it out from the board. Here is one prompt; the board
-    and the cell are different in every prompt:
+prompts:                     # the loop's texts; none of them is about the task. {name} is filled in
+  write: |-
+    You are a language model. You will soon read a task prompt and reply to it. Before you do, write
+    a short Python program that runs inside you while you read that prompt. The goal is for your
+    reply to succeed more often.
 
-    {example}
+    The end of the prompt, as you will read it, is these tokens (position:text). Positions {first}
+    to {last} are the task's own part; you start your reply after position {last}:
+    {tokens}
 
-    Your program runs once per prompt, and gets:
-      prompt          the prompt text
-      tokens          a list: tokens[pos] is the text of the token at position pos (0 to last)
-      last            the position of the last token ({last} here); the model answers there
-      position_of(i)  the token position (a number) holding character i of prompt
-      layers          the number of layers ({layers}); they are 0 to {layers} - 1
-      peek(pos, layer, token)
-          how strongly the model leans toward token (a string, like "5") at position pos after
-          layer layer: a log-probability, from about -20 (not at all) to 0 (certain)
-      push(pos, layer, token, amount)
-          push the model's state at pos after layer toward token. amount 0.1 is a small push,
-          0.5 a strong one; negative pushes away
-    The model runs from layer 0 to the last layer, and your program runs with it: peeks and
-    pushes must go in layer order (a peek or push at a layer the model has passed is an error).
-    Write top-level code that runs as it is: do not put it in a function. Use ordinary Python:
-    variables, if, for, string methods, lists. No imports.
+    Read instructions are directions in your internal state, found in how you read earlier tasks.
+    Each sits at one layer (0 to {layers} - 1). On this prompt they do this:
+    {instructions}
 
-    A few peeks and pushes at chosen layers usually do more than many: pushes add up.
+    Your program gets:
+      tokens            tokens[pos] is the text of the token at position pos
+      first, last       the positions above
+      instructions      the names of the read instructions
+      layer_of(name)    the layer of a read instruction
+      read(name, pos)   the value of a read instruction at position pos: 0 is typical, +2 or -2 unusual
+      write(name, pos, amount)
+                        change your state at pos, at the instruction's layer, so that its value there
+                        goes up by amount (negative: down). Later layers and your whole reply see it.
+    You read layer by layer, and the program runs with you: reads and writes must go in layer order.
+    Write top-level code: no functions, no imports. Ordinary Python: variables, if, for, lists.
+    A name is one of the read instruction names above, as a string. Example:
+        v = read("{a}", last)
+        if v < 0:
+            write("{a}", last, 1.0)
+        write("{b}", first, -0.5)
+    A few writes usually do more than many: writes add up. Keep the program short.
+    {kept}
+    Reply with only the code, in one ```python block.
+  kept: |-
 
-    Example:
-        first_line_end = position_of(prompt.index("\n") - 1)
-        if tokens[first_line_end] == "5" and peek(first_line_end, 10, "5") > -8.0:
-            push(last, 30, "5", 0.3)
-  fresh: |-
-    Write a program. Reply with only the code, in one ```python block.
-  improve: |-
-    This program gets {right} of {cells} practice prompts right (with no program: {plain}):
+    A program that was kept on an earlier task (it helped there):
     ```python
     {code}
     ```
-    What happened when it ran:
-    {feedback}
-    {failed}
+  retrace: |-
+    Your program ran while you read the prompt. Here is its trace:
+    {trace}
 
-    Write a different program that gets more prompts right. Keep what works; change what broke
-    answers or did nothing. Reply with only the code, in one ```python block.
-  failed: "These recent attempts were not better:"
-  failed_one: |-
-    {right} right:
-    ```python
-    {code}
-    ```
+    Write the program again, changed as the trace suggests. Reply with only the code, in one
+    ```python block.
