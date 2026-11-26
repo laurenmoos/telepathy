@@ -1,75 +1,102 @@
-"""The outer loop: writing sessions side by side, each building a program step by step.
+"""The outer loop: the model writes a program for itself in a standard coding loop.
 
-    ./run.sh [--set write.sessions=2] [--set write.writer=qwen3-8b-4bit] [--out runs/write]
+    1. Search: the model writes fresh programs until one gets more practice cells right than no
+       program.
+    2. Improve: it sees the kept program, what happened when it ran (cells right, what each line
+       did, a fixed and a broken cell with their traces) and its recent attempts that were not
+       better, and writes a different program. A program already tried is not run again. Each
+       step samples loop.samples programs and keeps the best if it gets more cells right. After
+       loop.restart_after steps with no gain, start again from 1. The best program over all
+       restarts is the result.
+At the end the best program is checked on the practice and held-out boards.
 
-At the end, the best program from all sessions is checked on the practice and held-out boards
-(eval/check.py). What one step does is in programs/write.py; who writes is in
-programs/writers.py.
+The same model writes the programs and runs them (model/live.py). Every text it sees is in
+config.yaml under prompts.
+
+    telepathy/run.sh [--set loop.steps=20] [--out runs/loop]
 """
-import json, os, random
+import json, os, random, re
 
 from .eval import check
-from .eval.practice import Practice
-from .programs import lang
-from .programs.write import act, word_table
-from .programs.writers import FileWriter, MLXWriter, ModelWriter
+from .eval.practice import Cells
 from .setup.log import log
-from .setup.settings import settings, load_model, load_words
+from .setup.settings import settings, load_live
 from .sudoku.boards import make_boards
+from .sudoku.prompt import prompt27
 
 
 def main(argv=None):
-    cfg, a = settings(argv, extra=lambda ap: ap.add_argument("--out", default="runs/write"))
-    w = cfg["write"]
+    cfg, a = settings(argv, extra=lambda ap: ap.add_argument("--out", default="runs/loop"))
+    lc, p = cfg["loop"], cfg["prompts"]
     os.makedirs(a.out, exist_ok=True)
-    rng = random.Random(w["seed"])
-    m = load_model(cfg, a)
-    load_words(m, cfg)
-    practice_boards, test_boards = make_boards(cfg, log=log)
-    practice = Practice(m, practice_boards, w["cells"], rng)
-    log(f"no program: {practice.right(practice.plain)} of {len(practice.cells)} practice cells right")
+    live = load_live(cfg)
+    practice, test = make_boards(cfg, log=log)
+    rng = random.Random(lc["seed"])
+    cells = Cells(live, practice, lc["cells"], rng)
+    n = len(cells.cells)
+    plain = sum(d == c[3] for d, c in zip(cells.plain, cells.cells))
+    log(f"no program: {plain} of {n} practice cells right")
+    example = cells.prompts[0]
+    base = p["base"].format(example=example, layers=len(live.layers), last=len(live.tok.encode(example)) - 1)
+    history, tried = [], {}                    # tried: code -> cells right (None if it did not run)
 
-    if w["writer"] == "files":
-        writer = FileWriter(a.out)
-    elif str(cfg["models"].get(w["writer"], w["writer"])).startswith("mlx-community/"):
-        writer = MLXWriter(cfg["models"].get(w["writer"], w["writer"]), w)
-    elif w["writer"]:
-        writer = ModelWriter(load_model(cfg, a, w["writer"]), w)
-    else:
-        writer = ModelWriter(m, w)
+    def write(prompt):
+        out = live.generate(prompt, lc["max_tokens"], lc["temperature"], lc["think"]).split("</think>")[-1]
+        m = re.search(r"```(?:python)?\n(.*?)```", out, re.S)
+        return (m.group(1) if m else out).strip()
 
-    p = cfg["prompts"]["loop"]
-    per_reply = p["one_action"] if w["actions"] == 1 else p["many_actions"].format(actions=w["actions"])
-    board_names = [n for n in lang.NAME_TO_WORD if not n.startswith("answer")]
-    sessions = []
-    for i in range(w["sessions"]):
-        keep = set(rng.sample(board_names, min(w["show_words"], len(board_names)))) | {
-            n for n in lang.NAME_TO_WORD if n.startswith("answer")}
-        system = p["system"].format(words=word_table(m, keep), per_reply=per_reply).rstrip()
-        first = p["first"].format(right=practice.right(practice.plain), cells=len(practice.cells))
-        sessions.append(dict(chat=[{"role": "system", "content": system}, {"role": "user", "content": first}],
-                             program=[], digits=practice.plain, best=[], best_digits=practice.plain, log=[]))
+    def attempt(stage, prompt):
+        code = write(prompt)
+        if code in tried:
+            history.append(dict(stage=stage, code=code, right=tried[code], feedback="already tried"))
+            return code, "tried", ""
+        try:
+            compile(code, "<program>", "exec")
+            feedback, right = cells.run(code, examples=lc["examples"])
+        except SyntaxError as e:
+            feedback, right = f"It does not run: line {e.lineno}: {e.msg}", None
+        tried[code] = right
+        history.append(dict(stage=stage, prompt=prompt, code=code, right=right, feedback=feedback))
+        json.dump(history, open(f"{a.out}/session.json", "w"), indent=1)
+        return code, right, feedback
 
-    for step in range(1, w["steps"] + 1):
-        replies = writer.reply([s["chat"] for s in sessions], step)
-        for s, text in zip(sessions, replies):
-            text = text.strip()
-            results = [act(s, x, practice) for x in lang.split_reply(text, w["actions"])]
-            feedback = p["next"].format(results="\n".join(results), program=lang.show(s["program"]))
-            s["chat"] += [{"role": "assistant", "content": text}, {"role": "user", "content": feedback}]
-            s["log"].append(dict(step=step, reply=text, results=results))
-        log(f"step {step}: cells right per session " + ", ".join(str(practice.right(s["digits"])) for s in sessions)
-            + f" (no program {practice.right(practice.plain)})")
-        for i, s in enumerate(sessions, 1):
-            log(f"    session {i}: " + " | ".join(r[:100] for r in s["log"][-1]["results"]))
-        json.dump([dict(program=s["program"], best=s["best"], log=s["log"]) for s in sessions],
-                  open(f"{a.out}/sessions.json", "w"), indent=1)
-
-    best = max(sessions, key=lambda s: practice.right(s["best_digits"]))["best"]
-    log("best program:\n" + lang.show(best))
-    open(f"{a.out}/best_program.txt", "w").write("\n".join(best) + "\n")
-    if best:
-        log("check:\n" + check.text(check.check(m, best, practice_boards, test_boards)))
+    best, best_right = None, plain
+    kept, kept_right, kept_feedback, failed, stall = None, plain, "", [], 0
+    for step in range(1, lc["steps"] + 1):
+        if kept is None:                       # search
+            code, right, feedback = attempt("search", base + "\n\n" + p["fresh"])
+            log(f"step {step}, search: {right if right is not None else 'error'} right (no program {plain})")
+            if right not in (None, "tried") and right > plain:
+                kept, kept_right, kept_feedback, failed, stall = code, right, feedback, [], 0
+                log(f"kept, {kept_right} right:\n" + kept)
+        else:                                  # improve
+            recent = "\n".join(p["failed_one"].format(right=r if r is not None else "does not run", code=c)
+                               for c, r in failed[-lc["show_failed"]:])
+            prompt = base + "\n\n" + p["improve"].format(right=kept_right, cells=n, plain=plain, code=kept,
+                                                         feedback=kept_feedback,
+                                                         failed=(p["failed"] + "\n" + recent) if recent else "")
+            got = [attempt("improve", prompt) for _ in range(lc["samples"])]
+            new = [(c, r, f) for c, r, f in got if r not in (None, "tried")]
+            top = max(new, key=lambda t: t[1], default=None)
+            log(f"step {step}, improve: " + ", ".join(str(r) if r is not None else "error" for _, r, _ in got)
+                + f" (kept {kept_right})")
+            if top and top[1] > kept_right:
+                kept, kept_right, kept_feedback, stall = top[0], top[1], top[2], 0
+                log(f"kept, {kept_right} right:\n" + kept)
+            else:
+                failed += [(c, r) for c, r, _ in got if r != "tried"]
+                stall += 1
+                if stall >= lc["restart_after"]:
+                    log(f"no gain in {stall} steps: restart from a fresh program")
+                    kept = None
+        if kept is not None and kept_right > best_right:
+            best, best_right = kept, kept_right
+    if best is None:
+        log("no program beat no program")
+        return
+    open(f"{a.out}/program.py", "w").write(best + "\n")
+    log(f"best program, {best_right} of {n} practice cells right:\n" + best)
+    log("check:\n" + check.text(check.check(live, best, practice, test)))
 
 
 if __name__ == "__main__":

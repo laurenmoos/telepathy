@@ -1,32 +1,29 @@
-"""Playing whole boards with programs.
+"""Playing whole boards with a program.
 
-    play(progs, boards, m)   every program fills every board, cell by cell; wrong digits stay in
-    summarize(moves)         boards solved and cells right
+    play(live, code, boards)   the program fills every board, cell by cell, in reading order;
+                               wrong digits stay in. Returns moves[board].
+    summarize(moves)           boards solved and cells right
 """
-from ..programs.run import run
+import numpy as np
+
+from ..sudoku.prompt import prompt27
 
 
-def play(progs, boards, m):
-    """Every program fills every board's empty cells in reading order. Wrong digits stay in.
-    All (program, board) pairs move one cell at a time together. Returns moves[program][board]."""
-    pairs = [(i, b) for i in range(len(progs)) for b in range(len(boards))]
-    grids = [[row[:] for row in boards[b]["board"]] for _, b in pairs]
-    todo = [[(r, c) for r in range(9) for c in range(9) if boards[b]["board"][r][c] == 0] for _, b in pairs]
-    moves = [[] for _ in pairs]
+def play(live, code, boards):
+    digits = [live.token_id(str(d)) for d in range(1, 10)]
+    grids = [[row[:] for row in b["board"]] for b in boards]
+    todo = [[(r, c) for r in range(9) for c in range(9) if b["board"][r][c] == 0] for b in boards]
+    moves = [[] for _ in boards]
     for step in range(max(len(t) for t in todo)):
-        active = [p for p in range(len(pairs)) if step < len(todo[p])]
-        m.prepare([(grids[p], *todo[p][step]) for p in active])
-        ran = run(m, [(grids[p], *todo[p][step], progs[pairs[p][0]]) for p in active])
-        for p, (digit, tr, _) in zip(active, ran):
-            i, b = pairs[p]
-            r, c = todo[p][step]
-            grids[p][r][c] = digit
-            moves[p].append(dict(r=r, c=c, digit=digit, correct=digit == boards[b]["solution"][r][c],
-                                 answer=boards[b]["solution"][r][c], trace=tr))
-    out = [[None] * len(boards) for _ in progs]
-    for p, (i, b) in enumerate(pairs):
-        out[i][b] = moves[p]
-    return out
+        active = [b for b in range(len(boards)) if step < len(todo[b])]
+        out = live.run([prompt27(grids[b], *todo[b][step]) for b in active], code, digits)
+        for b, (lp, trace, _) in zip(active, out):
+            r, c = todo[b][step]
+            d = int(np.argmax(lp)) + 1
+            grids[b][r][c] = d
+            moves[b].append(dict(r=r, c=c, digit=d, correct=d == boards[b]["solution"][r][c],
+                                 answer=boards[b]["solution"][r][c], trace=trace))
+    return moves
 
 
 def summarize(moves):

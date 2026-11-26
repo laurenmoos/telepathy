@@ -1,12 +1,9 @@
-"""A frozen model fills in sudoku cells while a program reads and writes words inside it.
+"""One model writes small programs that run inside its own forward pass while it fills in sudoku cells.
 
-    loop.py     the outer loop: writers build programs step by step
-    agent.py    a writer builds a program: generate, run, verify, read the trace, improve
+    loop.py     the outer loop: the model writes, runs, verifies and improves a program for itself
     check.py    check a program file on the practice and held-out boards
-    setup/      settings, logging, loading the model and its words
-    model/      the frozen model: loading, its state at word places, replies
-    words/      finding the words: answer words and board words
-    programs/   the program language, running programs, writing them
-    eval/       scoring programs: practice cells, playing boards, the check on held-out boards
+    model/      the model, and running programs inside its forward pass with peek and push (live.py)
+    eval/       the practice cells with feedback, playing whole boards, the check on held-out boards
+    setup/      settings and the log
     sudoku/     boards, the board prompt, the board sets
 """

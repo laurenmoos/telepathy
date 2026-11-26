@@ -1,57 +1,25 @@
-# Settings. A frozen model fills in sudoku cells while a program (programs/lang.py) reads and writes
-# words inside it; a writer builds the program step by step (loop.py).
+# Settings. One model writes small programs that run inside its own forward pass while it fills
+# in sudoku cells (loop.py). Programs use peek and push (model/live.py).
 
 models:
   qwen3-8b-4bit: mlx-community/Qwen3-8B-4bit    # writes programs and is steered by them (MLX)
-model: qwen3-8b-4bit         # the model that programs itself
+model: qwen3-8b-4bit
 
-words:                       # answer words (words/answer.py): directions at the answer position, no labels
-  boards: 1024               # boards Qwen reads to find candidates
-  jac_boards: 512            # new boards for each candidate's effect on the answer (9 backward passes each)
-  check_boards: 128          # new boards to check each chosen word against random directions
-  blanks: [1, 20]            # empty cells per board
-  pool_eigen: 12             # candidates per place and layer: directions where board differences move the answer
-  pool_pcs: 12               # candidates per place and layer: directions where boards differ most
-  primitives: 8              # words chosen
-  noise: 0.1                 # as a fraction of the strongest word's effect; smaller pushes harder for variety
-  max_overlap: 0.5           # skip a word whose effect over boards has |cosine| above this with a chosen word
-  max_direct: 3              # at most this many words that act mostly straight on the output
-  controls_per_place: 2      # random directions checked the same way
-  seed: 777
-
-reads:                       # board words (words/board.py): directions at the row, column and box line ends, no labels
-  boards: 2048               # boards Qwen reads to find them
-  describe_boards: 256       # new boards to describe them
-  blanks: [1, 2]
-  components: 32             # independent components per line end and layer
-  layers: [0]
-  seed: 991
+live:                        # running programs (model/live.py)
+  keep: [0, 6, 12, 18, 24, 30, 35]   # layers whose plain states are saved for the practice cells (speed)
 
 boards:                      # the task
-  practice: 96               # the writer's practice boards
+  practice: 96               # practice boards; the practice cells come from these
   test: 64                   # held out until the check
   blanks: [1, 2]             # empty cells per board
   seed: 0
   dir: boards
 
-write:                       # the writing loop (loop.py)
-  writer: null               # null: the steered model writes; or a name under models, or "files"
-  sessions: 8                # writing sessions side by side
-  steps: 16                  # replies per session
-  actions: 1                 # actions allowed per reply (then DONE)
-  cells: 96                  # practice cells each action is scored on (one pass each)
-  show_words: 999            # board words shown to each session (a random subset if fewer than all)
-  temperature: 1.0
-  repetition_penalty: 1.15
-  seed: 0
-
-agent:                       # the coding loop (agent.py): search for a scoring program, then improve it
-  writer: qwen3-8b-4bit
-  steps: 30                  # search or improve steps in all
+loop:                        # the coding loop (loop.py)
+  steps: 20                  # search or improve steps in all
   samples: 3                 # programs sampled per improve step
-  fresh_words: [5, 3]        # random board words and answer words named in each fresh prompt
   restart_after: 3           # improve steps with no gain before starting from a fresh program
-  cells: 96                  # practice cells each program is run on
+  cells: 32                  # practice cells each program is run on
   temperature: 0.7
   think: false               # Qwen3 thinking before each program
   max_tokens: 700            # per program
@@ -59,109 +27,52 @@ agent:                       # the coding loop (agent.py): search for a scoring 
   show_failed: 3             # recent attempts that were not better, shown when improving
   seed: 0
 
-prompts:                     # every text a writer sees; {name} fields are filled in by the code
-  loop:                      # the writing loop (loop.py)
-    system: |
-      You write a small Python program that runs inside a language model, the same kind of
-      model as you, while it fills in one empty cell of a sudoku board. The model reads the board's
-      rows, columns and boxes, one line each, and then names the digit for the cell.
+prompts:                     # every text the model sees; {name} fields are filled in by the code
+  base: |-
+    Write a short Python program. It runs inside a language model (you) while the model reads a
+    prompt and gives the next token. The goal is for the model to give the right answer more
+    often. Here is one prompt the model reads; the right answer is the digit after the "=":
 
-      Your program reads and changes a few numbers inside the model, called words. On each board a
-      word has a value: 0 is typical, +1 or -1 is unusual.
-        row_end[i], col_end[i], box_end[i]: at the end of the cell's row, column and box line, at the
-            model's first layer. They show what is in that line.
-        answer[i]: where the model gives its answer, at later layers. Changing them changes the answer.
-      The words, and what each one's value goes up with on real boards:
-      {words}
+    {example}
 
-      Statements:
-        set(W, EXPR)                set word W to EXPR. EXPR is a number like 2.00, or words with
-                                    factors, like 0.50 * row_end[3] - col_end[7].
-        clear(W)                    set word W back to 0.
-        if EXPR > X:                run the indented lines if EXPR > X on this board (X from -2 to 2),
-            set(...) or clear(...)
-        else:                       otherwise these (optional).
-            set(...) or clear(...)
-        best = argmax(W1, W2, ...)  which of these 2 to 9 words is largest on this board,
-        if best == 0:               then run the lines under its number.
-            set(...) or clear(...)
-        elif best == 1:
-            set(...) or clear(...)
-      The model runs forward through its layers, and so does your program: a statement can only read
-      words at the same layer as, or an earlier layer than, the words it writes. The line words come
-      first, the answer words later.
+    Every prompt has this form. Your program runs once per prompt, and gets:
+      prompt          the prompt text
+      tokens          the text of each token; positions are 0 to last
+      last            the position of the last token ({last} here); the model answers there
+      token_at(i)     the token position holding character i of prompt
+      layers          the number of layers ({layers}); they are 0 to {layers} - 1
+      peek(pos, layer, token)
+          how strongly the model leans toward token (a string, like "5") at position pos after
+          layer layer: a log-probability, from about -20 (not at all) to 0 (certain)
+      push(pos, layer, token, amount)
+          push the model's state at pos after layer toward token. amount 0.1 is a small push,
+          0.5 a strong one; negative pushes away
+    The model runs from layer 0 to the last layer, and your program runs with it: peeks and
+    pushes must go in layer order (a peek or push at a layer the model has passed is an error).
+    Write top-level code that runs as it is: do not put it in a function. Use ordinary Python:
+    variables, if, for, string methods, lists. No imports.
 
-      You build the program one step at a time. {per_reply}
-        ADD                 add statements at the end
-        <statements>
-        END
-        REPLACE k           replace statement number k
-        <statements>
-        END
-        DELETE k            delete statement number k
-        END
-        TEST                run statements on their own, once, without changing the program
-        <statements>
-        END
-        TEST W              see word W's average value on the practice cells
-        END
-      After each reply you see what each step did on the practice cells. A change that makes the
-      program worse is undone. Use TEST to learn what words do, then ADD what helps.
-      The goal is to get as many cells right as possible.
-    one_action: "Each reply is exactly one step:"
-    many_actions: "Each reply is up to {actions} steps, one after another, then a line DONE. They run in order:"
-    first: |-
-      The program is empty. With no program, {right} of {cells} practice cells are right.
-      Take your first step.
-    next: |-
-      {results}
+    Example:
+        eq = token_at(prompt.rindex("="))
+        first_line_end = token_at(prompt.index("\n") - 1)
+        if peek(first_line_end, 10, "5") > -8.0:
+            push(last, 30, "5", 0.3)
+  fresh: |-
+    Write a program. Reply with only the code, in one ```python block.
+  improve: |-
+    This program gets {right} of {cells} practice prompts right (with no program: {plain}):
+    ```python
+    {code}
+    ```
+    What happened when it ran:
+    {feedback}
+    {failed}
 
-      Current program:
-      {program}
-
-      Next step.
-  agent:                     # the coding loop (agent.py)
-    base: |-
-      Write a short Python program in a restricted language. The program runs inside a language
-      model while it fills in one empty cell of a sudoku board, and it should make the model
-      answer the right digit more often.
-
-      Four lists already exist: row_end[0..31], col_end[0..31], box_end[0..31], answer[0..7].
-      Do not define or fill them; your program only uses them.
-      Reading row_end, col_end or box_end gives a number: what the model saw in the cell's row,
-      column and box. Assigning to answer[k] pushes the model's answer toward some digits.
-
-      Allowed: numbers, variables, + - * / with numbers, if / elif / else on comparisons (> < >= <=)
-      joined with and / or / not, for loops over range(...) or lists, and
-      best = argmax(w0, w1, ...) followed by if best == 0: / elif best == 1: ...
-      Not allowed: functions, while, imports, print, multiplying two list values together.
-
-      Example:
-          if row_end[3] > 1.0:
-              answer[5] = 3.0
-          best = argmax(box_end[4], box_end[9], col_end[11])
-          if best == 0:
-              answer[6] = 3.0
-          elif best == 2:
-              answer[1] = -3.0
-    fresh: |-
-      Write a program that reads several of these values and sets answer values depending on them.
-      Use these: {words}.
-      Reply with only the code, in one ```python block.
-    improve: |-
-      This program gets {right} of {cells} practice cells right (with no program: {plain}):
-      ```python
-      {code}
-      ```
-      What happened when it ran:
-      {feedback}
-      {failed}
-
-      Write a different program that gets more cells right. Keep what works; change what broke
-      cells or did nothing. Reply with only the code, in one ```python block.
-    failed: "These recent attempts were not better:"
-    failed_one: |-
-      {right} cells right:
-      ```python
-      {code}
-      ```
+    Write a different program that gets more prompts right. Keep what works; change what broke
+    answers or did nothing. Reply with only the code, in one ```python block.
+  failed: "These recent attempts were not better:"
+  failed_one: |-
+    {right} right:
+    ```python
+    {code}
+    ```

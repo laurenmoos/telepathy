@@ -1,1 +1,1 @@
-"""Settings, logging, and loading the model and its words."""
+"""Settings, the log, and loading the model."""
